@@ -24,9 +24,11 @@ with open(".github/sync_to_drive/config.json", "r") as f:
 
 allowed_extensions = config["extensions"]
 specific_files = config["files"]
+ignored_files = config.["ignored_files"]
 
 # Crea un conjunt amb els fitxers específics per comparar ràpidament
 specific_files_set = set(specific_files)
+ignored_files_set = set(ignored_files)
 
 # Sincronitza els fitxers
 # os.walk(".") començarà a l'arrel del projecte
@@ -35,6 +37,10 @@ for root, dirs, files in os.walk("."):
     if ".github" in root or ".git" in root:
         continue
     for file in files:
+        # Ignora els fitxers a la llista d'ignorats
+        if file in ignored_files_set:
+            continue
+
         file_path = os.path.join(root, file)
         relative_path = os.path.relpath(file_path, ".")
 
