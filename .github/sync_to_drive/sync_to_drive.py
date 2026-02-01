@@ -1,0 +1,61 @@
+import os
+import json
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
+# Canvia el directori de treball al root del repositori
+os.chdir("../../..")
+
+# Carrega les credencials i el refresh token
+creds = Credentials(
+    None,
+    refresh_token=os.getenv("REFRESH_TOKEN"),
+    client_id=json.loads(os.getenv("CREDENTIALS"))["installed"]["client_id"],
+    client_secret=json.loads(os.getenv("CREDENTIALS"))["installed"]["client_secret"],
+    token_uri=json.loads(os.getenv("CREDENTIALS"))["installed"]["token_uri"],
+)
+
+service = build("drive", "v3", credentials=creds)
+folder_id = os.getenv("FOLDER_ID")
+
+# Carrega la configuració
+with open(".github/sync_to_drive/config.json", "r") as f:
+    config = json.load(f)
+allowed_extensions = config["extensions"]
+specific_files = config["files"]
+
+# Crea un conjunt amb els fitxers específics per comparar ràpidament
+specific_files_set = set(specific_files)
+
+# Sincronitza els fitxers
+for root, dirs, files in os.walk("."):
+    # Ignora la carpeta .github i altres fitxers del sistema
+    if ".github" in root or ".git" in root:
+        continue
+    for file in files:
+        file_path = os.path.join(root, file)
+        relative_path = os.path.relpath(file_path, ".")
+
+        # Comprova si el fitxer està a la llista de fitxers específics
+        if relative_path in specific_files_set:
+            upload = True
+        else:
+            # Si no, comprova si té una extensió permesa
+            upload = any(file.endswith(ext) for ext in allowed_extensions)
+
+        if upload:
+            query = f"name='{file}' and '{folder_id}' in parents"
+            response = service.files().list(q=query, spaces="drive").execute()
+            files_in_drive = response.get("files", [])
+
+            if files_in_drive:
+                file_id = files_in_drive[0]["id"]
+                media = MediaFileUpload(file_path, resumable=True)
+                service.files().update(fileId=file_id, media_body=media).execute()
+            else:
+                file_metadata = {"name": file, "parents": [folder_id]}
+                media = MediaFileUpload(file_path, resumable=True)
+                service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+
+print("Sincronització completada!")
