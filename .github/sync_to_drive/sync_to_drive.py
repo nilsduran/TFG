@@ -4,8 +4,6 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# Canvia el directori de treball al root del repositori
-os.chdir("../../..")
 
 # Carrega les credencials i el refresh token
 creds = Credentials(
@@ -20,8 +18,10 @@ service = build("drive", "v3", credentials=creds)
 folder_id = os.getenv("FOLDER_ID")
 
 # Carrega la configuració
+# Aquesta ruta relativa ara funcionarà perquè som a l'arrel
 with open(".github/sync_to_drive/config.json", "r") as f:
     config = json.load(f)
+
 allowed_extensions = config["extensions"]
 specific_files = config["files"]
 
@@ -29,6 +29,7 @@ specific_files = config["files"]
 specific_files_set = set(specific_files)
 
 # Sincronitza els fitxers
+# os.walk(".") començarà a l'arrel del projecte
 for root, dirs, files in os.walk("."):
     # Ignora la carpeta .github i altres fitxers del sistema
     if ".github" in root or ".git" in root:
@@ -45,6 +46,8 @@ for root, dirs, files in os.walk("."):
             upload = any(file.endswith(ext) for ext in allowed_extensions)
 
         if upload:
+            # Afegim un print per veure el progrés als logs de GitHub
+            print(f"Pujant: {file}")
             query = f"name='{file}' and '{folder_id}' in parents"
             response = service.files().list(q=query, spaces="drive").execute()
             files_in_drive = response.get("files", [])
