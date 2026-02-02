@@ -24,7 +24,7 @@ with open(".github/sync_to_drive/config.json", "r") as f:
 
 allowed_extensions = config["extensions"]
 specific_files = config["files"]
-ignored_files = config.["ignored_files"]
+ignored_files = config["ignored_files"]
 
 # Crea un conjunt amb els fitxers específics per comparar ràpidament
 specific_files_set = set(specific_files)
