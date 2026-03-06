@@ -59,6 +59,7 @@ for root, dirs, files in os.walk("."):
             files_in_drive = response.get("files", [])
 
             if files_in_drive:
+                # Actualitza el primer fitxer trobat (Drive manté l'historial de versions automàticament)
                 file_id = files_in_drive[0]["id"]
                 media = MediaFileUpload(file_path, resumable=True)
                 service.files().update(fileId=file_id, media_body=media).execute()
