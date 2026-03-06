@@ -63,6 +63,10 @@ for root, dirs, files in os.walk("."):
                 file_id = files_in_drive[0]["id"]
                 media = MediaFileUpload(file_path, resumable=True)
                 service.files().update(fileId=file_id, media_body=media).execute()
+                # Mou els duplicats a la paperera (no s'esborren permanentment)
+                for duplicate in files_in_drive[1:]:
+                    service.files().update(fileId=duplicate["id"], body={"trashed": True}).execute()
+                    print(f"  Duplicat mogut a la paperera: {file}")
             else:
                 file_metadata = {"name": file, "parents": [folder_id]}
                 media = MediaFileUpload(file_path, resumable=True)
