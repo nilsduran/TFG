@@ -55,15 +55,16 @@ for root, dirs, files in os.walk("."):
             # Afegim un print per veure el progrés als logs de GitHub
             print(f"Pujant: {file}")
             query = f"name='{file}' and '{folder_id}' in parents and trashed=false"
-            response = service.files().list(q=query, spaces="drive").execute()
+            response = service.files().list(q=query, spaces="drive", fields="files(id, createdTime)").execute()
             files_in_drive = response.get("files", [])
 
             if files_in_drive:
-                # Actualitza el primer fitxer trobat (Drive manté l'historial de versions automàticament)
+                # Ordena per data de creació per quedar-se amb l'original (el més antic)
+                files_in_drive.sort(key=lambda f: f["createdTime"])
                 file_id = files_in_drive[0]["id"]
                 media = MediaFileUpload(file_path, resumable=True)
                 service.files().update(fileId=file_id, media_body=media).execute()
-                # Mou els duplicats a la paperera (no s'esborren permanentment)
+                # Mou els duplicats (els més nous) a la paperera
                 for duplicate in files_in_drive[1:]:
                     service.files().update(fileId=duplicate["id"], body={"trashed": True}).execute()
                     print(f"  Duplicat mogut a la paperera: {file}")
