@@ -1,0 +1,13 @@
+Left eye,Right eye,Response,Code
+Red,Red,Red,1
+Green,Green,Green,2
+Red,Green,Red,3
+Green,Red,Red,4
+Red,Green,Green,5
+Green,Red,Green,6
+Red,Green,Both,7
+Green,Red,Both,8
+Red,Red,Green,9
+Green,Green,Red,10
+Red,Red,Both,11
+Green,Green,Both,12
