@@ -54,7 +54,7 @@ for root, dirs, files in os.walk("."):
         if upload:
             # Afegim un print per veure el progrés als logs de GitHub
             print(f"Pujant: {file}")
-            query = f"name='{file}' and '{folder_id}' in parents"
+            query = f"name='{file}' and '{folder_id}' in parents and trashed=false"
             response = service.files().list(q=query, spaces="drive").execute()
             files_in_drive = response.get("files", [])
 
