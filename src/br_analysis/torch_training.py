@@ -12,7 +12,7 @@ import torch
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,39 @@ class TorchTrainConfig:
     val_size: float = 0.2
     random_seed: int = 42
     device: str | None = None
+
+
+class NumpyClassificationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+    def __init__(self, X: np.ndarray, y: np.ndarray) -> None:
+        self.X = np.asarray(X, dtype=np.float32)
+        self.y = np.asarray(y, dtype=np.int64)
+
+    def __len__(self) -> int:
+        return int(self.X.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        x_item = torch.from_numpy(self.X[index])
+        y_item = torch.tensor(self.y[index], dtype=torch.long)
+        return x_item, y_item
+
+
+def build_dataloader(
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    batch_size: int,
+    shuffle: bool,
+    device: torch.device,
+) -> DataLoader:
+    dataset = NumpyClassificationDataset(X, y)
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=0,
+        pin_memory=device.type == "cuda",
+        persistent_workers=False,
+    )
 
 
 def standardize_train_test(X_train: np.ndarray, X_test: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -76,29 +109,11 @@ def fit_one_split(
     X_tr, X_val = X_train[tr_idx], X_train[val_idx]
     y_tr, y_val = y_train[tr_idx], y_train[val_idx]
 
-    # Use single-process data loading and pin_memory only on CUDA to avoid
-    # kernel crashes in constrained or CPU-only environments (Colab). Setting
-    # num_workers=0 avoids worker fork overhead that can lead to instability.
-    pin_memory = device.type == "cuda"
-    train_loader = DataLoader(
-        TensorDataset(torch.from_numpy(X_tr), torch.from_numpy(y_tr.astype(np.int64))),
-        batch_size=config.batch_size,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=pin_memory,
-    )
-    val_loader = DataLoader(
-        TensorDataset(torch.from_numpy(X_val), torch.from_numpy(y_val.astype(np.int64))),
-        batch_size=config.batch_size,
-        num_workers=0,
-        pin_memory=pin_memory,
-    )
-    test_loader = DataLoader(
-        TensorDataset(torch.from_numpy(X_test), torch.from_numpy(y_test.astype(np.int64))),
-        batch_size=config.batch_size,
-        num_workers=0,
-        pin_memory=pin_memory,
-    )
+    # Build lazy datasets so each split is batched on demand instead of being
+    # copied into a second full tensor upfront.
+    train_loader = build_dataloader(X_tr, y_tr, batch_size=config.batch_size, shuffle=True, device=device)
+    val_loader = build_dataloader(X_val, y_val, batch_size=config.batch_size, shuffle=False, device=device)
+    test_loader = build_dataloader(X_test, y_test, batch_size=config.batch_size, shuffle=False, device=device)
 
     model = make_model().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
