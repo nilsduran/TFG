@@ -27,7 +27,17 @@ def load_torch_state_dict(path: Path) -> dict[str, torch.Tensor]:
 
 def _extract_features(backbone: nn.Module, x: torch.Tensor) -> torch.Tensor:
     if hasattr(backbone, "forward_encoder"):
-        out = backbone.forward_encoder(x)
+        import inspect
+
+        sig = inspect.signature(backbone.forward_encoder)
+        kwargs = {}
+        if "mask_ratio" in sig.parameters:
+            kwargs["mask_ratio"] = 0.0
+        if "chan_idx" in sig.parameters:
+            # Create channel indices as a long tensor on the same device as input
+            kwargs["chan_idx"] = torch.arange(x.shape[1], dtype=torch.long, device=x.device)
+
+        out = backbone.forward_encoder(x, **kwargs)
         if isinstance(out, tuple):
             out = out[0]
         if isinstance(out, dict):
@@ -124,8 +134,8 @@ def load_backbone_weights(backbone: nn.Module, checkpoint_path: Path, *, strict:
 @dataclass(frozen=True)
 class STEEGFormerConfig:
     repo_path: Path
-    variant: str = "small"
-    weights_file: str = "ST-EEGFormer_small_encoder.safetensors"
+    variant: str = "base"
+    weights_file: str = "ST-EEGFormer_base_encoder.safetensors"
     weight_kind: str = "encoder"
     n_classes: int = 2
     lora_r: int = 8

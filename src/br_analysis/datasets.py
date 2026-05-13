@@ -38,8 +38,9 @@ def _subject_ids(csv_path: Path, max_subjects: int | None) -> list[str]:
 
 
 def _read_eeg_epochs(fif_path: Path, *, preload: bool = True) -> mne.Epochs:
-    ep = mne.read_epochs(fif_path, preload=preload)
-    if not preload:
+    # Always open with preload=False to avoid Windows/G-Drive OSError 22 with large files
+    ep = mne.read_epochs(fif_path, preload=False)
+    if preload:
         ep.load_data()
     for ch_idx, _ in enumerate(ep.ch_names):
         if ep.info["chs"][ch_idx]["unit"] == 0:

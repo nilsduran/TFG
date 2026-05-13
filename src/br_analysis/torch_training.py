@@ -34,7 +34,9 @@ def standardize_train_test(X_train: np.ndarray, X_test: np.ndarray) -> tuple[np.
     return ((X_train - mean) / std).astype(np.float32), ((X_test - mean) / std).astype(np.float32)
 
 
-def _evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[float, float, np.ndarray, np.ndarray]:
+def _evaluate(
+    model: nn.Module, loader: DataLoader, device: torch.device
+) -> tuple[float, float, np.ndarray, np.ndarray]:
     model.eval()
     loss_fn = nn.CrossEntropyLoss()
     losses: list[float] = []
@@ -73,18 +75,28 @@ def fit_one_split(
     X_tr, X_val = X_train[tr_idx], X_train[val_idx]
     y_tr, y_val = y_train[tr_idx], y_train[val_idx]
 
+    # Use single-process data loading and pin_memory only on CUDA to avoid
+    # kernel crashes in constrained or CPU-only environments (Colab). Setting
+    # num_workers=0 avoids worker fork overhead that can lead to instability.
+    pin_memory = device.type == "cuda"
     train_loader = DataLoader(
         TensorDataset(torch.from_numpy(X_tr), torch.from_numpy(y_tr.astype(np.int64))),
         batch_size=config.batch_size,
         shuffle=True,
+        num_workers=0,
+        pin_memory=pin_memory,
     )
     val_loader = DataLoader(
         TensorDataset(torch.from_numpy(X_val), torch.from_numpy(y_val.astype(np.int64))),
         batch_size=config.batch_size,
+        num_workers=0,
+        pin_memory=pin_memory,
     )
     test_loader = DataLoader(
         TensorDataset(torch.from_numpy(X_test), torch.from_numpy(y_test.astype(np.int64))),
         batch_size=config.batch_size,
+        num_workers=0,
+        pin_memory=pin_memory,
     )
 
     model = make_model().to(device)
@@ -107,7 +119,9 @@ def fit_one_split(
             train_losses.append(float(loss.item()))
 
         val_loss, val_acc, _, _ = _evaluate(model, val_loader, device)
-        history.append({"epoch": epoch, "train_loss": float(np.mean(train_losses)), "val_loss": val_loss, "val_acc": val_acc})
+        history.append(
+            {"epoch": epoch, "train_loss": float(np.mean(train_losses)), "val_loss": val_loss, "val_acc": val_acc}
+        )
         if val_acc > best_val:
             best_val = val_acc
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
@@ -160,7 +174,9 @@ def cross_validate_torch_model(
         rows.append(metrics)
         history["fold"] = fold
         histories.append(history)
-        print(f"Fold {fold}: acc={metrics['test_acc']:.3f}, bal_acc={metrics['test_balanced_acc']:.3f}, auc={metrics['test_auc']:.3f}")
+        print(
+            f"Fold {fold}: acc={metrics['test_acc']:.3f}, bal_acc={metrics['test_balanced_acc']:.3f}, auc={metrics['test_auc']:.3f}"
+        )
     return pd.DataFrame(rows), pd.concat(histories, ignore_index=True)
 
 
@@ -185,7 +201,9 @@ def plot_torch_history(history: pd.DataFrame, *, output_file: Path | None = None
 
 def plot_fold_metrics(metrics: pd.DataFrame, *, output_file: Path | None = None) -> None:
     cols = ["test_acc", "test_balanced_acc", "test_auc"]
-    d = metrics.melt(id_vars="fold", value_vars=[c for c in cols if c in metrics.columns], var_name="metric", value_name="value")
+    d = metrics.melt(
+        id_vars="fold", value_vars=[c for c in cols if c in metrics.columns], var_name="metric", value_name="value"
+    )
     plt.figure(figsize=(8, 4.5))
     import seaborn as sns
 
