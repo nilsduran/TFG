@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -147,6 +148,12 @@ def fit_one_split(
         "best_val_acc": float(best_val),
         "epochs_ran": int(len(history)),
     }
+    # Release the fold-local model and dataloaders promptly; on Colab CPU this
+    # avoids cumulative memory growth when the backbone is rebuilt multiple times.
+    del model, optimizer, loss_fn, train_loader, val_loader, test_loader, best_state
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
     return metrics, pd.DataFrame(history)
 
 
