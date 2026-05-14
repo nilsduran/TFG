@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -27,6 +28,13 @@ class TorchTrainConfig:
     random_seed: int = 42
     device: str | None = None
     progress: bool = False
+
+
+def _format_seconds(seconds: float) -> str:
+    total = max(0, int(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 class NumpyClassificationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
@@ -106,6 +114,7 @@ def fit_one_split(
     y_test: np.ndarray,
     config: TorchTrainConfig,
 ) -> tuple[dict[str, float], pd.DataFrame]:
+    split_start = time.perf_counter()
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("TorchTrainConfig.device='cuda' was requested, but CUDA is not available.")
@@ -131,6 +140,7 @@ def fit_one_split(
     best_val = -np.inf
     wait = 0
     history = []
+    epoch_durations: list[float] = []
 
     # Optionally use tqdm for epoch and batch progress
     try:
@@ -143,6 +153,7 @@ def fit_one_split(
         epoch_iter = _tqdm(epoch_iter, desc="Epochs")
 
     for epoch in epoch_iter:
+        epoch_start = time.perf_counter()
         model.train()
         train_losses: list[float] = []
         batch_iter = train_loader
@@ -169,6 +180,20 @@ def fit_one_split(
             wait += 1
             if wait >= config.patience:
                 break
+
+        epoch_seconds = time.perf_counter() - epoch_start
+        epoch_durations.append(epoch_seconds)
+        if config.progress:
+            avg_epoch = float(np.mean(epoch_durations))
+            epochs_left = max(0, config.epochs - epoch)
+            split_elapsed = time.perf_counter() - split_start
+            split_eta = avg_epoch * epochs_left
+            print(
+                f"Epoch {epoch}/{config.epochs} | "
+                f"train_loss={history[-1]['train_loss']:.4f} val_acc={val_acc:.4f} | "
+                f"epoch={_format_seconds(epoch_seconds)} elapsed={_format_seconds(split_elapsed)} "
+                f"eta_split={_format_seconds(split_eta)}"
+            )
 
     if best_state is not None:
         model.load_state_dict(best_state)
@@ -211,6 +236,8 @@ def cross_validate_torch_model(
     splitter = StratifiedKFold(n_splits=config.n_splits, shuffle=True, random_state=config.random_seed)
     rows = []
     histories = []
+    fold_times: list[float] = []
+    cv_start = time.perf_counter()
     # Optionally show fold progress
     try:
         from tqdm.auto import tqdm as _tqdm
@@ -222,6 +249,7 @@ def cross_validate_torch_model(
         fold_iter = _tqdm(list(fold_iter), desc="Folds")
 
     for fold, (train_idx, test_idx) in fold_iter:
+        fold_start = time.perf_counter()
         X_train, X_test = standardize_train_test(X[train_idx], X[test_idx])
         y_train, y_test = y[train_idx], y[test_idx]
         metrics, history = fit_one_split(make_model, X_train, y_train, X_test, y_test, config)
@@ -229,8 +257,15 @@ def cross_validate_torch_model(
         rows.append(metrics)
         history["fold"] = fold
         histories.append(history)
+        fold_seconds = time.perf_counter() - fold_start
+        fold_times.append(fold_seconds)
+        avg_fold = float(np.mean(fold_times))
+        folds_left = max(0, config.n_splits - fold)
+        eta_cv = avg_fold * folds_left
+        elapsed_cv = time.perf_counter() - cv_start
         print(
-            f"Fold {fold}: acc={metrics['test_acc']:.3f}, bal_acc={metrics['test_balanced_acc']:.3f}, auc={metrics['test_auc']:.3f}"
+            f"Fold {fold}: acc={metrics['test_acc']:.3f}, bal_acc={metrics['test_balanced_acc']:.3f}, auc={metrics['test_auc']:.3f} "
+            f"| fold_time={_format_seconds(fold_seconds)} elapsed_cv={_format_seconds(elapsed_cv)} eta_cv={_format_seconds(eta_cv)}"
         )
     return pd.DataFrame(rows), pd.concat(histories, ignore_index=True)
 
