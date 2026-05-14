@@ -26,6 +26,7 @@ class TorchTrainConfig:
     val_size: float = 0.2
     random_seed: int = 42
     device: str | None = None
+    progress: bool = False
 
 
 class NumpyClassificationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
@@ -77,7 +78,15 @@ def _evaluate(
     y_true: list[np.ndarray] = []
     probs: list[np.ndarray] = []
     with torch.no_grad():
-        for xb, yb in loader:
+        # Optionally show a progress bar for evaluation
+        try:
+            from tqdm.auto import tqdm as _tqdm  # lazy import
+        except Exception:
+            _tqdm = None
+        iter_loader = loader
+        if getattr(loader, "__len__", None) is not None and _tqdm is not None and getattr(loader, "progress", False):
+            iter_loader = _tqdm(loader, desc="Eval", leave=False)
+        for xb, yb in iter_loader:
             xb, yb = xb.to(device), yb.to(device)
             logits = model(xb)
             losses.append(float(loss_fn(logits, yb).item()))
@@ -123,10 +132,23 @@ def fit_one_split(
     wait = 0
     history = []
 
-    for epoch in range(1, config.epochs + 1):
+    # Optionally use tqdm for epoch and batch progress
+    try:
+        from tqdm.auto import tqdm as _tqdm
+    except Exception:
+        _tqdm = None
+
+    epoch_iter = range(1, config.epochs + 1)
+    if config.progress and _tqdm is not None:
+        epoch_iter = _tqdm(epoch_iter, desc="Epochs")
+
+    for epoch in epoch_iter:
         model.train()
         train_losses: list[float] = []
-        for xb, yb in train_loader:
+        batch_iter = train_loader
+        if config.progress and _tqdm is not None:
+            batch_iter = _tqdm(train_loader, desc=f"Train ep {epoch}", leave=False)
+        for xb, yb in batch_iter:
             xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad(set_to_none=True)
             loss = loss_fn(model(xb), yb)
@@ -134,6 +156,7 @@ def fit_one_split(
             optimizer.step()
             train_losses.append(float(loss.item()))
 
+        # run evaluation (no progress for val by default)
         val_loss, val_acc, _, _ = _evaluate(model, val_loader, device)
         history.append(
             {"epoch": epoch, "train_loss": float(np.mean(train_losses)), "val_loss": val_loss, "val_acc": val_acc}
@@ -188,7 +211,17 @@ def cross_validate_torch_model(
     splitter = StratifiedKFold(n_splits=config.n_splits, shuffle=True, random_state=config.random_seed)
     rows = []
     histories = []
-    for fold, (train_idx, test_idx) in enumerate(splitter.split(X, y), start=1):
+    # Optionally show fold progress
+    try:
+        from tqdm.auto import tqdm as _tqdm
+    except Exception:
+        _tqdm = None
+
+    fold_iter = enumerate(splitter.split(X, y), start=1)
+    if config.progress and _tqdm is not None:
+        fold_iter = _tqdm(list(fold_iter), desc="Folds")
+
+    for fold, (train_idx, test_idx) in fold_iter:
         X_train, X_test = standardize_train_test(X[train_idx], X[test_idx])
         y_train, y_test = y[train_idx], y[test_idx]
         metrics, history = fit_one_split(make_model, X_train, y_train, X_test, y_test, config)
