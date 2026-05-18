@@ -11,9 +11,10 @@ import numpy as np
 import pandas as pd
 import torch
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score
-from sklearn.model_selection import StratifiedKFold, train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
+
+from .experiments import temporal_stratified_splits
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,18 @@ class TorchTrainConfig:
     random_seed: int = 42
     device: str | None = None
     progress: bool = False
+
+
+def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.ndarray, np.ndarray]:
+    """Split train/validation chronologically, with validation after training."""
+    n_samples = len(y_train)
+    min_val = max(2, int(round(n_samples * val_size)))
+    for val_start in range(n_samples - min_val, 1, -1):
+        tr_idx = np.arange(val_start)
+        val_idx = np.arange(val_start, n_samples)
+        if len(np.unique(y_train[tr_idx])) >= 2 and len(np.unique(y_train[val_idx])) >= 2:
+            return tr_idx, val_idx
+    raise ValueError("No valid temporal train/validation split with both classes in each subset.")
 
 
 def _format_seconds(seconds: float) -> str:
@@ -118,12 +131,7 @@ def fit_one_split(
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("TorchTrainConfig.device='cuda' was requested, but CUDA is not available.")
-    tr_idx, val_idx = train_test_split(
-        np.arange(len(y_train)),
-        test_size=config.val_size,
-        stratify=y_train,
-        random_state=config.random_seed,
-    )
+    tr_idx, val_idx = temporal_train_val_split(y_train, config.val_size)
     X_tr, X_val = X_train[tr_idx], X_train[val_idx]
     y_tr, y_val = y_train[tr_idx], y_train[val_idx]
 
@@ -225,7 +233,20 @@ def cross_validate_torch_model(
     y: np.ndarray,
     make_model: Callable[[], nn.Module],
     config: TorchTrainConfig,
+    *,
+    subjects: np.ndarray | None = None,
+    subject_id: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if subject_id is not None:
+        if subjects is None:
+            raise ValueError("subjects must be provided when subject_id is set.")
+        mask = np.asarray(subjects) == subject_id
+        if not mask.any():
+            raise ValueError(f"Subject not found: {subject_id}")
+        X = X[mask]
+        y = y[mask]
+        print(f"Filtering to subject {subject_id}: {len(y)} epochs")
+
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("TorchTrainConfig.device='cuda' was requested, but CUDA is not available.")
@@ -233,7 +254,6 @@ def cross_validate_torch_model(
     if device.type == "cuda":
         print(f"CUDA device: {torch.cuda.get_device_name(device)}")
 
-    splitter = StratifiedKFold(n_splits=config.n_splits, shuffle=True, random_state=config.random_seed)
     rows = []
     histories = []
     fold_times: list[float] = []
@@ -244,7 +264,8 @@ def cross_validate_torch_model(
     except Exception:
         _tqdm = None
 
-    fold_iter = enumerate(splitter.split(X, y), start=1)
+    splits = temporal_stratified_splits(y, config.n_splits)
+    fold_iter = enumerate(splits, start=1)
     if config.progress and _tqdm is not None:
         fold_iter = _tqdm(list(fold_iter), desc="Folds")
 
@@ -260,7 +281,7 @@ def cross_validate_torch_model(
         fold_seconds = time.perf_counter() - fold_start
         fold_times.append(fold_seconds)
         avg_fold = float(np.mean(fold_times))
-        folds_left = max(0, config.n_splits - fold)
+        folds_left = max(0, len(splits) - fold)
         eta_cv = avg_fold * folds_left
         elapsed_cv = time.perf_counter() - cv_start
         print(

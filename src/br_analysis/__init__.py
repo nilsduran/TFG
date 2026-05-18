@@ -8,7 +8,7 @@ from .config import (
     detect_project_paths,
 )
 from .datasets import LoadedDataset, load_band_channel_dataset, load_fused_band_dataset
-from .experiments import ChanceLevelExperiment, ExperimentSettings, TimeWindowGrid
+from .experiments import ChanceLevelExperiment, ExperimentSettings, TimeWindowGrid, temporal_stratified_splits
 from .models import LogRegModelFactory, RiemannLdaModelFactory
 from .deep import RawEpochSpec, electrode_distance_adjacency, load_raw_epoch_dataset, temporal_band_features
 from .torch_models import inject_lora_into_linears
@@ -26,6 +26,7 @@ __all__ = [
     "ChanceLevelExperiment",
     "ExperimentSettings",
     "TimeWindowGrid",
+    "temporal_stratified_splits",
     "LogRegModelFactory",
     "RiemannLdaModelFactory",
     "RawEpochSpec",

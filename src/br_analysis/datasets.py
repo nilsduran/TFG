@@ -80,7 +80,7 @@ def _undersample(ep: mne.Epochs, y: np.ndarray, *, seed: int) -> tuple[mne.Epoch
     idx_1 = np.where(y == 1)[0]
     rng = np.random.default_rng(seed)
     keep_idx = np.concatenate([rng.choice(idx_0, n_min, replace=False), rng.choice(idx_1, n_min, replace=False)])
-    rng.shuffle(keep_idx)
+    keep_idx.sort()
     return ep[keep_idx], y[keep_idx]
 
 

@@ -363,8 +363,8 @@ def load_backbone_with_lora(
 @dataclass(frozen=True)
 class STEEGFormerConfig:
     repo_path: Path
-    variant: str = "base"
-    weights_file: str = "ST-EEGFormer_base_encoder.safetensors"
+    variant: str = "small"
+    weights_file: str = "ST-EEGFormer_small_encoder.safetensors"
     weight_kind: str = "encoder"
     n_classes: int = 2
     lora_r: int = 8

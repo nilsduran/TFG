@@ -23,3 +23,8 @@ class MeanPower:
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         return np.mean(X**2, axis=-1, keepdims=True)
+
+
+# TODO: if high-dimensional per-subject features are added, dimensionality
+# reduction such as PCA should be fitted inside each training fold only. Fitting
+# it before the temporal split would leak information from future test epochs.

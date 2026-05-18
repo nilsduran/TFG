@@ -8,8 +8,6 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 from scipy.stats import ttest_rel
-from sklearn.model_selection import StratifiedKFold
-
 from .features import HilbertMeanEnvelope
 
 
@@ -49,13 +47,36 @@ def choose_n_splits(y_s: np.ndarray, max_splits: int = 5) -> int:
     return max(2, min(max_splits, int(np.bincount(y_s).min())))
 
 
+def temporal_stratified_splits(y_s: np.ndarray, n_splits: int) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Forward-chaining CV splits that keep test epochs later than train epochs.
+
+    The epoch order in ``y_s`` is treated as chronological. Each candidate test
+    fold is a contiguous future block; folds without both classes in train/test
+    are skipped so the retained folds stay stratified enough for binary decoding.
+    """
+    y_s = np.asarray(y_s)
+    indices = np.arange(len(y_s))
+    blocks = np.array_split(indices, n_splits + 1)
+    splits: list[tuple[np.ndarray, np.ndarray]] = []
+    for fold_idx in range(1, len(blocks)):
+        train_idx = np.concatenate(blocks[:fold_idx])
+        test_idx = blocks[fold_idx]
+        if len(train_idx) == 0 or len(test_idx) == 0:
+            continue
+        if len(np.unique(y_s[train_idx])) < 2 or len(np.unique(y_s[test_idx])) < 2:
+            continue
+        splits.append((train_idx, test_idx))
+    if not splits:
+        raise ValueError("No valid temporal stratified CV splits could be built for this label sequence.")
+    return splits
+
+
 def cv_accuracy(X_feat: np.ndarray, y_s: np.ndarray, n_splits: int, model_factory: Any, *, seed: int) -> float:
     if X_feat.ndim == 1:
         X_feat = X_feat[:, None]
-    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    clf = model_factory.make()
     accs = []
-    for tr, te in cv.split(X_feat, y_s):
+    for tr, te in temporal_stratified_splits(y_s, n_splits):
+        clf = model_factory.make()
         clf.fit(X_feat[tr], y_s[tr])
         accs.append(float(np.mean(clf.predict(X_feat[te]) == y_s[te])))
     return float(np.mean(accs))
