@@ -40,19 +40,19 @@ def load_raw_epoch_dataset(
     sfreq: float | None = None
 
     if verbose:
-        print(f"Subjectes seleccionats a carregar: {len(subject_ids)}")
+        print(f"Selected subjects to load: {len(subject_ids)}")
 
     for subj_name in subject_ids:
         fif_path = fif_by_subject.get(subj_name)
         if fif_path is None:
-            skipped.append(f"{subj_name}: fitxer .fif no trobat")
+            skipped.append(f"{subj_name}: .fif file not found")
             continue
 
         ep = _read_eeg_epochs(fif_path, preload=True)
         if spec.picks is not None:
             available = [ch for ch in spec.picks if ch in ep.ch_names]
             if len(available) < max(2, int(0.5 * len(spec.picks))):
-                skipped.append(f"{fif_path.name}: massa pocs canals requerits")
+                skipped.append(f"{fif_path.name}: too few required channels")
                 continue
             ep = ep.copy().pick(available)
 
@@ -87,7 +87,7 @@ def load_raw_epoch_dataset(
         subj_blocks.extend([subj_name] * len(y_s))
 
     if not x_blocks:
-        raise RuntimeError("No s'ha pogut carregar cap subjecte valid.")
+        raise RuntimeError("No valid subjects could be loaded.")
 
     X = np.concatenate(x_blocks, axis=0)
     dataset = LoadedDataset(
@@ -102,10 +102,10 @@ def load_raw_epoch_dataset(
         info=common_info,
     )
     if verbose:
-        print(f"Mostres totals: {len(dataset.y)} | {task.class_0}={(dataset.y == 0).sum()} | {task.class_1}={(dataset.y == 1).sum()}")
-        print(f"Subjectes carregats: {len(np.unique(dataset.subjects))} | Canals: {len(dataset.channel_names)}")
+        print(f"Total samples: {len(dataset.y)} | {task.class_0}={(dataset.y == 0).sum()} | {task.class_1}={(dataset.y == 1).sum()}")
+        print(f"Loaded subjects: {len(np.unique(dataset.subjects))} | Channels: {len(dataset.channel_names)}")
         if skipped:
-            print("Omesos:")
+            print("Skipped:")
             for message in skipped:
                 print(f"  {message}")
     return dataset
@@ -122,6 +122,10 @@ def temporal_band_features(
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Return graph node features with shape (trials, windows, channels, bands)."""
     from scipy.signal import welch
+    try:
+        from scipy.integrate import trapezoid
+    except ImportError:
+        from scipy.integrate import trapz as trapezoid
 
     n_trials, n_channels, n_times = X.shape
     win_samples = max(4, int(round(window_sec * sfreq)))
@@ -136,7 +140,7 @@ def temporal_band_features(
         freqs, psd = welch(segment, fs=sfreq, nperseg=min(win_samples, 256), axis=-1)
         for bi, (_, (lo, hi)) in enumerate(band_items):
             mask = (freqs >= lo) & (freqs <= hi)
-            power = np.trapz(psd[..., mask], freqs[mask], axis=-1)
+            power = trapezoid(psd[..., mask], freqs[mask], axis=-1)
             power = np.maximum(power, np.finfo(np.float32).eps)
             out[:, wi, :, bi] = np.log(power) if mode.lower() == "de" else power
     return out, centers.astype(np.float32), [name for name, _ in band_items]

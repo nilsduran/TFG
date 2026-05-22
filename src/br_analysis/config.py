@@ -97,3 +97,59 @@ def detect_project_paths(
     )
     paths.ensure()
     return paths
+
+
+COMMON_BAND_RANGES = {
+    "theta": (5.0, 7.0),
+    "alpha": (8.0, 12.0),
+}
+
+TARGET_BANDS_CLUSTERS = {
+    "theta": ["Fp1", "Fp2", "Fz", "F1", "F2", "FCz", "FC1", "FC2", "Cz"],
+    "alpha": ["Pz", "P1", "P2", "P3", "P4", "P7", "P8", "Oz", "O1", "O2", "PO3", "PO4", "POz"],
+}
+
+
+def get_task_config(
+    task_name: str,
+    analysis_root: Path,
+    *,
+    name: str | None = None,
+    analysis_window: tuple[float, float] | None = None,
+) -> BinaryTaskConfig:
+    """Get standardized BinaryTaskConfig for the given task name."""
+    if task_name == "c_vs_ip":
+        return BinaryTaskConfig(
+            name=name or "c_vs_i",
+            class_0="Congruent",
+            class_1="Incongruent_Pure",
+            event_codes={"Congruent": [1, 2], "Incongruent_Pure": [3, 4, 5, 6]},
+            selected_subjects_csv=analysis_root / "01_exploracio" / "tables" / "subjectes_seleccionats.csv",
+            max_subjects=24,
+            undersample_classes=True,
+            analysis_window=analysis_window or (0.0, 1.5),
+        )
+    elif task_name == "im_vs_ip":
+        return BinaryTaskConfig(
+            name=name or "im_vs_ip",
+            class_0="Incongruent_Mixed",
+            class_1="Incongruent_Pure",
+            event_codes={"Incongruent_Mixed": [7, 8], "Incongruent_Pure": [3, 4, 5, 6]},
+            selected_subjects_csv=analysis_root / "01_exploracio" / "tables" / "subjectes_seleccionats_im_vs_ip.csv",
+            max_subjects=29,
+            undersample_classes=True,
+            analysis_window=analysis_window or (0.0, 1.5),
+        )
+    else:
+        raise ValueError(f"Unknown task name: {task_name}")
+
+
+def get_epochs_grid(task_name: str) -> list[int]:
+    """Get the customized number of epochs for the given task name."""
+    if task_name == "c_vs_ip":
+        return [20, 40, 70, 100, 150, 200, 300, 380]
+    elif task_name == "im_vs_ip":
+        return [20, 40, 60, 100, 150, 200, 240, 270]
+    else:
+        raise ValueError(f"Unknown task name: {task_name}")
+

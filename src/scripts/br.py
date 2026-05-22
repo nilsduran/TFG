@@ -30,8 +30,8 @@ class BinocularRivalryCatalan(MovingCameraScene):
         "interpretation_title": "Interpretació dels assajos incongruents",
         "incongruent_stimulus": "Estímul incongruent",
         "or": "o",
-        "pure": "Incongruent pur",
-        "mixed": "Incongruent mixt",
+        "pure": "Incongruent pure",
+        "mixed": "Incongruent mixed",
         "response": "Resposta",
     }
 

@@ -46,7 +46,7 @@ def plot_subject_lines(
     if ylim is not None:
         plt.ylim(*ylim)
     plt.grid(alpha=0.25)
-    plt.legend(title="Subjecte", bbox_to_anchor=(1.02, 1), loc="upper left")
+    plt.legend(title="Subject", bbox_to_anchor=(1.02, 1), loc="upper left")
     plt.tight_layout()
     if output_file is not None:
         plt.savefig(output_file, dpi=150, bbox_inches="tight")
@@ -80,7 +80,7 @@ def plot_accuracy_distributions(
     )
     plt.xlabel("Accuracy")
     plt.ylabel("Density")
-    plt.title("Distribucio global: accuracy real vs chance")
+    plt.title("Global distribution: real accuracy vs chance")
     plt.legend()
     plt.tight_layout()
     if output_file is not None:
@@ -128,7 +128,7 @@ def plot_surpass_rate(
     plt.ylim(-0.02, 1.02)
     plt.xlabel("n_epochs_total")
     plt.ylabel("Fraction subjects above q95")
-    plt.title("Taxa de superacio del llindar q95")
+    plt.title("Exceedance rate of the q95 threshold")
     plt.grid(alpha=0.25)
     plt.tight_layout()
     if output_file is not None:
@@ -189,3 +189,116 @@ def classifier_sensor_weights(model, n_sensors: int) -> np.ndarray:
                 k += 1
         return weights
     return np.abs(np.resize(coef, n_sensors)).astype(float)
+
+
+def compute_gradient_saliency(
+    model: "torch.nn.Module",
+    X: np.ndarray,
+    y: np.ndarray,
+    device: str = "cpu",
+    mode: str = "input_grad",
+) -> np.ndarray:
+    """Calcula la rellevància temporal-espacial usant els gradients de PyTorch."""
+    import torch
+
+    model.eval()
+    
+    # Ens assegurem que el model estigui al dispositiu correcte
+    device_obj = torch.device(device)
+    model.to(device_obj)
+
+    # Convertim a tensor i activem gradients
+    X_tensor = torch.as_tensor(X, dtype=torch.float32, device=device_obj).requires_grad_(True)
+    
+    # Forward pass
+    logits = model(X_tensor)
+    
+    # Agafem les puntuacions de la classe correcte/desitjada
+    y_tensor = torch.as_tensor(y, dtype=torch.long, device=device_obj)
+    scores = logits[torch.arange(len(y_tensor)), y_tensor]
+    
+    # Backpropagation per obtenir gradients respecte a l'entrada X
+    model.zero_grad()
+    scores.sum().backward()
+    
+    grads = X_tensor.grad.detach().cpu().numpy()
+    
+    if mode == "grad":
+        saliency = np.abs(grads)
+    elif mode == "input_grad":
+        saliency = grads * X
+    else:
+        raise ValueError(f"Saliency mode not supported: {mode}")
+        
+    return saliency
+
+
+def plot_eeg_topomap(
+    weights: np.ndarray,
+    ch_names: list[str],
+    *,
+    info: "mne.Info" | None = None,
+    title: str = "",
+    cmap: str = "RdBu_r",
+    output_file: Path | None = None,
+    show: bool = True,
+) -> None:
+    """Dibuixa un topomap 2D del cap a partir de pesos de canals usant MNE."""
+    import mne
+    import matplotlib.pyplot as plt
+
+    if info is None:
+        # Creem info mínima amb montage estàndard
+        info = mne.create_info(ch_names=list(ch_names), sfreq=128.0, ch_types="eeg")
+        montage = mne.channels.make_standard_montage("standard_1005")
+        info.set_montage(montage, on_missing="ignore")
+
+    fig, ax = plt.subplots(figsize=(5, 5))
+    im, _ = mne.viz.plot_topomap(weights, info, axes=ax, cmap=cmap, show=False)
+    plt.colorbar(im, ax=ax, shrink=0.6)
+    ax.set_title(title, fontsize=12)
+    plt.tight_layout()
+
+    if output_file is not None:
+        plt.savefig(output_file, dpi=150, bbox_inches="tight")
+        
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_attention_heatmap(
+    attention: np.ndarray,
+    *,
+    title: str = "Attention Map",
+    xlabel: str = "Key tokens",
+    ylabel: str = "Query tokens",
+    xticklabels: list[str] | list[bool] | None = None,
+    yticklabels: list[str] | list[bool] | None = None,
+    output_file: Path | None = None,
+    show: bool = True,
+) -> None:
+    """Dibuixa un heatmap dels pesos d'atenció d'un Transformer."""
+    fig, ax = plt.subplots(figsize=(6, 5))
+    sns.heatmap(
+        attention,
+        ax=ax,
+        cmap="viridis",
+        xticklabels=xticklabels if xticklabels is not None else True,
+        yticklabels=yticklabels if yticklabels is not None else True,
+        cbar_kws={"label": "Attention weight"},
+    )
+    ax.set_title(title, fontsize=12)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    plt.tight_layout()
+
+    if output_file is not None:
+        plt.savefig(output_file, dpi=150, bbox_inches="tight")
+        
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+

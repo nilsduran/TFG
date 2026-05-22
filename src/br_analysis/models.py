@@ -10,6 +10,45 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 
+class SafeLogisticRegressionCV(LogisticRegressionCV):
+    """LogisticRegressionCV subclass that dynamically adjusts cv splits
+
+    or falls back to LogisticRegression if a class has fewer than 2 members,
+    avoiding StratifiedKFold validation errors.
+    """
+
+    def fit(self, X, y, sample_weight=None, **params):
+        min_class_size = int(np.bincount(y).min())
+        if min_class_size < 2:
+            from sklearn.linear_model import LogisticRegression
+
+            clf = LogisticRegression(
+                C=1.0,
+                penalty=self.penalty,
+                solver=self.solver,
+                max_iter=self.max_iter,
+                random_state=self.random_state,
+            )
+            clf.fit(X, y, sample_weight=sample_weight, **params)
+            self.classes_ = clf.classes_
+            self.coef_ = clf.coef_
+            self.intercept_ = clf.intercept_
+            self.n_iter_ = clf.n_iter_
+            self.C_ = np.array([clf.C])
+            return self
+
+        original_cv = self.cv
+        cv_val = 5 if original_cv is None else original_cv
+        if isinstance(cv_val, int):
+            actual_cv = max(2, min(cv_val, min_class_size))
+            self.cv = actual_cv
+        try:
+            super().fit(X, y, sample_weight=sample_weight, **params)
+        finally:
+            self.cv = original_cv
+        return self
+
+
 class ModelFactory(Protocol):
     """Small interface future model runners can implement."""
 
@@ -27,7 +66,7 @@ class LogRegModelFactory:
     def make(self):
         return make_pipeline(
             StandardScaler(),
-            LogisticRegressionCV(
+            SafeLogisticRegressionCV(
                 Cs=list(np.logspace(-4, 4, 9)),
                 cv=3,
                 penalty="l2",
@@ -38,6 +77,7 @@ class LogRegModelFactory:
                 refit=True,
             ),
         )
+
 
 
 @dataclass(frozen=True)

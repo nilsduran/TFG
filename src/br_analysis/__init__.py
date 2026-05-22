@@ -6,6 +6,10 @@ from .config import (
     FusedBandSpec,
     ProjectPaths,
     detect_project_paths,
+    get_task_config,
+    get_epochs_grid,
+    COMMON_BAND_RANGES,
+    TARGET_BANDS_CLUSTERS,
 )
 from .datasets import LoadedDataset, load_band_channel_dataset, load_fused_band_dataset
 from .experiments import ChanceLevelExperiment, ExperimentSettings, TimeWindowGrid, temporal_stratified_splits
@@ -20,6 +24,10 @@ __all__ = [
     "FusedBandSpec",
     "ProjectPaths",
     "detect_project_paths",
+    "get_task_config",
+    "get_epochs_grid",
+    "COMMON_BAND_RANGES",
+    "TARGET_BANDS_CLUSTERS",
     "LoadedDataset",
     "load_band_channel_dataset",
     "load_fused_band_dataset",

@@ -29,6 +29,7 @@ class TorchTrainConfig:
     random_seed: int = 42
     device: str | None = None
     progress: bool = False
+    l1_lambda: float = 0.0
 
 
 def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.ndarray, np.ndarray]:
@@ -126,6 +127,8 @@ def fit_one_split(
     X_test: np.ndarray,
     y_test: np.ndarray,
     config: TorchTrainConfig,
+    *,
+    save_path: Path | None = None,
 ) -> tuple[dict[str, float], pd.DataFrame]:
     split_start = time.perf_counter()
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -171,6 +174,12 @@ def fit_one_split(
             xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad(set_to_none=True)
             loss = loss_fn(model(xb), yb)
+            if getattr(config, "l1_lambda", 0.0) > 0.0:
+                l1_penalty = 0.0
+                for name, param in model.named_parameters():
+                    if "classifier" in name and "weight" in name:
+                        l1_penalty = l1_penalty + torch.sum(torch.abs(param))
+                loss = loss + config.l1_lambda * l1_penalty
             loss.backward()
             optimizer.step()
             train_losses.append(float(loss.item()))
@@ -205,6 +214,9 @@ def fit_one_split(
 
     if best_state is not None:
         model.load_state_dict(best_state)
+        if save_path is not None:
+            torch.save(best_state, save_path)
+            
     test_loss, test_acc, y_true, p_test = _evaluate(model, test_loader, device)
     pred = (p_test >= 0.5).astype(int)
     try:
@@ -236,6 +248,9 @@ def cross_validate_torch_model(
     *,
     subjects: np.ndarray | None = None,
     subject_id: str | None = None,
+    save_weights_dir: Path | None = None,
+    weights_prefix: str | None = None,
+    load_weights: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if subject_id is not None:
         if subjects is None:
@@ -254,6 +269,10 @@ def cross_validate_torch_model(
     if device.type == "cuda":
         print(f"CUDA device: {torch.cuda.get_device_name(device)}")
 
+    if save_weights_dir is not None:
+        save_weights_dir = Path(save_weights_dir)
+        save_weights_dir.mkdir(parents=True, exist_ok=True)
+
     rows = []
     histories = []
     fold_times: list[float] = []
@@ -271,9 +290,64 @@ def cross_validate_torch_model(
 
     for fold, (train_idx, test_idx) in fold_iter:
         fold_start = time.perf_counter()
+        
+        fold_weights_path = None
+        if save_weights_dir is not None and weights_prefix is not None:
+            fold_weights_path = save_weights_dir / f"{weights_prefix}_fold{fold}.pt"
+
+        if load_weights and fold_weights_path is not None and fold_weights_path.exists():
+            print(f"Fold {fold}: Loading weights from {fold_weights_path}")
+            model = make_model().to(device)
+            model.load_state_dict(torch.load(fold_weights_path, map_location=device))
+            
+            _, X_test = standardize_train_test(X[train_idx], X[test_idx])
+            y_test = y[test_idx]
+            test_loader = build_dataloader(X_test, y_test, batch_size=config.batch_size, shuffle=False, device=device)
+            
+            test_loss, test_acc, y_true_arr, p_test = _evaluate(model, test_loader, device)
+            pred = (p_test >= 0.5).astype(int)
+            try:
+                auc = float(roc_auc_score(y_true_arr, p_test))
+            except ValueError:
+                auc = float("nan")
+            
+            metrics = {
+                "test_loss": test_loss,
+                "test_acc": test_acc,
+                "test_balanced_acc": balanced_accuracy_score(y_true_arr, pred),
+                "test_auc": auc,
+                "best_val_acc": float("nan"),
+                "epochs_ran": 0,
+                "fold": fold,
+            }
+            rows.append(metrics)
+            
+            history = pd.DataFrame([{
+                "epoch": 1,
+                "train_loss": float("nan"),
+                "val_loss": float("nan"),
+                "val_acc": float("nan"),
+                "fold": fold
+            }])
+            histories.append(history)
+            
+            fold_seconds = time.perf_counter() - fold_start
+            fold_times.append(fold_seconds)
+            del model, test_loader
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+            print(
+                f"Fold {fold} (LOADED): acc={metrics['test_acc']:.3f}, bal_acc={metrics['test_balanced_acc']:.3f}, auc={metrics['test_auc']:.3f} "
+                f"| fold_time={_format_seconds(fold_seconds)}"
+            )
+            continue
+
         X_train, X_test = standardize_train_test(X[train_idx], X[test_idx])
         y_train, y_test = y[train_idx], y[test_idx]
-        metrics, history = fit_one_split(make_model, X_train, y_train, X_test, y_test, config)
+        metrics, history = fit_one_split(
+            make_model, X_train, y_train, X_test, y_test, config, save_path=fold_weights_path
+        )
         metrics["fold"] = fold
         rows.append(metrics)
         history["fold"] = fold

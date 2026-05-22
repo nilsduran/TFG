@@ -38,10 +38,34 @@ def _subject_ids(csv_path: Path, max_subjects: int | None) -> list[str]:
 
 
 def _read_eeg_epochs(fif_path: Path, *, preload: bool = True) -> mne.Epochs:
-    # Always open with preload=False to avoid Windows/G-Drive OSError 22 with large files
-    ep = mne.read_epochs(fif_path, preload=False)
+    import shutil
+    import tempfile
+    import os
+    import weakref
+
+    # Copiem a local per evitar OSError 22 de Google Drive Stream a Windows
+    temp_dir = Path(tempfile.gettempdir())
+    temp_fif_path = temp_dir / f"temp_eeg_{os.getpid()}_{fif_path.name}"
+    shutil.copy(fif_path, temp_fif_path)
+
+    # Sempre obrim amb preload=False inicialment
+    ep = mne.read_epochs(temp_fif_path, preload=False)
     if preload:
         ep.load_data()
+        try:
+            temp_fif_path.unlink()
+        except Exception:
+            pass
+    else:
+        # Netegem automàticament quan l'objecte Epochs es destrueixi
+        def _cleanup(p: str):
+            try:
+                if os.path.exists(p):
+                    os.unlink(p)
+            except Exception:
+                pass
+        weakref.finalize(ep, _cleanup, str(temp_fif_path))
+
     for ch_idx, _ in enumerate(ep.ch_names):
         if ep.info["chs"][ch_idx]["unit"] == 0:
             ep.info["chs"][ch_idx]["unit"] = mne.io.constants.FIFF.FIFF_UNIT_V
@@ -63,14 +87,14 @@ def _select_binary_epochs(
     mask_0 = np.isin(events, codes_0)
     mask_1 = np.isin(events, codes_1)
     if not mask_0.any() or not mask_1.any():
-        return None, None, f"falten codis requerits ({class_0}={int(mask_0.sum())}, {class_1}={int(mask_1.sum())})"
+        return None, None, f"missing required codes ({class_0}={int(mask_0.sum())}, {class_1}={int(mask_1.sum())})"
 
     ep = ep[mask_0 | mask_1].copy().crop(tmin=task.analysis_window[0], tmax=task.analysis_window[1])
     events = ep.events[:, 2]
     y = np.where(np.isin(events, codes_0), 0, 1).astype(np.int8)
     n_0, n_1 = int((y == 0).sum()), int((y == 1).sum())
     if min(n_0, n_1) == 0:
-        return None, None, f"classe buida ({class_0}={n_0}, {class_1}={n_1})"
+        return None, None, f"empty class ({class_0}={n_0}, {class_1}={n_1})"
     return ep, y, None
 
 
@@ -98,7 +122,7 @@ def load_band_channel_dataset(
     """Load filtered single-channel band features with shape (trials, specs, times)."""
     subject_ids = _subject_ids(task.selected_subjects_csv, task.max_subjects)
     if verbose:
-        print(f"Subjectes seleccionats a carregar: {len(subject_ids)}")
+        print(f"Selected subjects to load: {len(subject_ids)}")
 
     fif_by_subject = {p.stem: p for p in paths.data_files}
     x_blocks: list[np.ndarray] = []
@@ -110,7 +134,7 @@ def load_band_channel_dataset(
     for subj_name in subject_ids:
         fif_path = fif_by_subject.get(subj_name)
         if fif_path is None:
-            skipped.append(f"{subj_name}: fitxer .fif no trobat")
+            skipped.append(f"{subj_name}: .fif file not found")
             continue
 
         ep = _read_eeg_epochs(fif_path, preload=True)
@@ -128,7 +152,7 @@ def load_band_channel_dataset(
                 missing_specs.append(f"{ch_name}-{band}")
                 continue
             if band not in spec.band_ranges:
-                raise ValueError(f"Banda no suportada: {band}. Defineix-la a band_ranges.")
+                raise ValueError(f"Band not supported: {band}. Define it in band_ranges.")
 
             l_freq, h_freq = spec.band_ranges[band]
             ep_band = ep.copy().pick([ch_name])
@@ -137,7 +161,7 @@ def load_band_channel_dataset(
             band_arrays.append(ep_band.get_data()[:, 0, :].astype(np.float32))
 
         if missing_specs or len(band_arrays) != len(spec.target_band_channels):
-            skipped.append(f"{fif_path.name}: falten especificacions requerides ({', '.join(missing_specs)})")
+            skipped.append(f"{fif_path.name}: missing required specs ({', '.join(missing_specs)})")
             continue
 
         if times is None:
@@ -147,7 +171,7 @@ def load_band_channel_dataset(
         subj_blocks.extend([subj_name] * len(y_s))
 
     if not x_blocks:
-        raise RuntimeError("No s'ha pogut carregar cap subjecte valid.")
+        raise RuntimeError("No valid subjects could be loaded.")
 
     dataset = LoadedDataset(
         X=np.concatenate(x_blocks, axis=0),
@@ -171,7 +195,7 @@ def load_fused_band_dataset(
     """Load band-specific channel clusters and a fused concatenation."""
     subject_ids = _subject_ids(task.selected_subjects_csv, task.max_subjects)
     if verbose:
-        print(f"Subjectes seleccionats a carregar: {len(subject_ids)}")
+        print(f"Selected subjects to load: {len(subject_ids)}")
 
     fif_by_subject = {p.stem: p for p in paths.data_files}
     x_blocks: dict[str, list[np.ndarray]] = {band: [] for band in spec.target_bands_clusters}
@@ -184,7 +208,7 @@ def load_fused_band_dataset(
     for subj_name in subject_ids:
         fif_path = fif_by_subject.get(subj_name)
         if fif_path is None:
-            skipped.append(f"{subj_name}: fitxer .fif no trobat")
+            skipped.append(f"{subj_name}: .fif file not found")
             continue
 
         ep = _read_eeg_epochs(fif_path, preload=False)
@@ -202,7 +226,7 @@ def load_fused_band_dataset(
         for band, target_channels in spec.target_bands_clusters.items():
             avail_chs = [ch for ch in target_channels if ch in ep.ch_names]
             if len(avail_chs) < len(target_channels) * spec.min_cluster_fraction:
-                skipped.append(f"{fif_path.name}: massa pocs canals per al cluster {band}")
+                skipped.append(f"{fif_path.name}: too few channels for cluster {band}")
                 valid_for_subject = False
                 break
 
@@ -222,7 +246,7 @@ def load_fused_band_dataset(
         subj_blocks.extend([subj_name] * len(y_s))
 
     if not y_blocks:
-        raise RuntimeError("No s'ha pogut carregar cap subjecte valid.")
+        raise RuntimeError("No valid subjects could be loaded.")
 
     x_dict = {band: np.concatenate(blocks, axis=0) for band, blocks in x_blocks.items()}
     if "theta" in x_dict and "alpha" in x_dict:
@@ -231,7 +255,7 @@ def load_fused_band_dataset(
         if verbose:
             print(
                 "Multi-network fusion: "
-                f"Theta ({x_dict['theta'].shape[1]}) + Alfa ({x_dict['alpha'].shape[1]}) = {x_dict['fused'].shape[1]} channels"
+                f"Theta ({x_dict['theta'].shape[1]}) + Alpha ({x_dict['alpha'].shape[1]}) = {x_dict['fused'].shape[1]} channels"
             )
 
     dataset = LoadedDataset(
@@ -250,12 +274,12 @@ def _print_dataset_summary(dataset: LoadedDataset, task: BinaryTaskConfig, *, ve
     if not verbose:
         return
     print(
-        f"Mostres totals: {len(dataset.y)} | "
+        f"Total samples: {len(dataset.y)} | "
         f"{task.class_0}={(dataset.y == 0).sum()} | {task.class_1}={(dataset.y == 1).sum()}"
     )
-    print(f"Subjectes carregats: {len(np.unique(dataset.subjects))}")
-    print(f"Canals: {dataset.channel_names}")
+    print(f"Loaded subjects: {len(np.unique(dataset.subjects))}")
+    print(f"Channels: {dataset.channel_names}")
     if dataset.skipped:
-        print("Omesos:")
+        print("Skipped:")
         for message in dataset.skipped:
             print(f"  {message}")
