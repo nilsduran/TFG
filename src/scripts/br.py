@@ -3,13 +3,13 @@ from __future__ import annotations
 from manim import *
 
 """
-Rivalitat binocular: assaig típic i interpretacions
-Executar: manim -pql src\\scripts\\br.py BinocularRivalryCatalan
+Binocular rivalry: typical trial and interpretations
+Run: manim -pql src\\scripts\\br.py BinocularRivalry
 """
 
 
-class BinocularRivalryCatalan(MovingCameraScene):
-    """Visualització esquemàtica d'un assaig de rivalitat binocular."""
+class BinocularRivalry(MovingCameraScene):
+    """Schematic visualization of a binocular rivalry trial."""
 
     RED_STIM = "#d7191c"
     GREEN_STIM = "#1aaf54"
@@ -17,22 +17,22 @@ class BinocularRivalryCatalan(MovingCameraScene):
     DARK = "#151515"
     GABOR_OPACITY = 0.34
     TEXTS = {
-        "main_title": "Rivalitat binocular",
-        "example_title": "Exemple Incongruent",
-        "blank": "Pantalla en blanc",
-        "ramp": "Pujada gradual",
-        "stim_on": "Inici de l'estímul",
-        "stim_off": "Fi de l'estímul",
-        "response_choice": "Resposta tria perceptiva",
-        "variations_title": "Quatre variacions de l'assaig",
+        "main_title": "Binocular rivalry",
+        "example_title": "Incongruent Example",
+        "blank": "Blank screen",
+        "ramp": "Ramp up",
+        "stim_on": "Stimulus onset",
+        "stim_off": "Stimulus offset",
+        "response_choice": "Perceptual response",
+        "variations_title": "Four trial variations",
         "congruent": "Congruent",
         "incongruent": "Incongruent",
-        "interpretation_title": "Interpretació dels assajos incongruents",
-        "incongruent_stimulus": "Estímul incongruent",
-        "or": "o",
-        "pure": "Incongruent pure",
-        "mixed": "Incongruent mixed",
-        "response": "Resposta",
+        "interpretation_title": "Interpretation of incongruent trials",
+        "incongruent_stimulus": "Incongruent stimulus",
+        "or": "or",
+        "pure": "Pure incongruent",
+        "mixed": "Mixed incongruent",
+        "response": "Response",
     }
 
     def text(self, key):
@@ -341,26 +341,3 @@ class BinocularRivalryCatalan(MovingCameraScene):
         title.move_to(box.get_top() + DOWN * 0.35)
         content.move_to(box.get_center() + DOWN * 0.3)
         return group
-
-
-class BinocularRivalryEnglish(BinocularRivalryCatalan):
-    """English version of the binocular rivalry animation."""
-
-    TEXTS = {
-        "main_title": "Binocular rivalry",
-        "example_title": "Incongruent Example",
-        "blank": "Blank screen",
-        "ramp": "Ramp up",
-        "stim_on": "Stimulus onset",
-        "stim_off": "Stimulus offset",
-        "response_choice": "Perceptual response",
-        "variations_title": "Four trial variations",
-        "congruent": "Congruent",
-        "incongruent": "Incongruent",
-        "interpretation_title": "Interpretation of incongruent trials",
-        "incongruent_stimulus": "Incongruent stimulus",
-        "or": "or",
-        "pure": "Pure incongruent",
-        "mixed": "Mixed incongruent",
-        "response": "Response",
-    }

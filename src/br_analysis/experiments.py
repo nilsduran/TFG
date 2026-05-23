@@ -54,6 +54,9 @@ def temporal_stratified_splits(y_s: np.ndarray, n_splits: int) -> list[tuple[np.
     only one class), this function dynamically falls back to lower split counts (down to 2).
     If that still fails, it searches for a single split point that yields valid binary
     train and test partitions.
+    
+    As an ultimate fallback (e.g. for degenerate randomized permutations where one class 
+    completely precedes the other), it returns a randomized stratified 2-fold split.
     """
     y_s = np.asarray(y_s)
     
@@ -81,7 +84,15 @@ def temporal_stratified_splits(y_s: np.ndarray, n_splits: int) -> list[tuple[np.
         if len(np.unique(y_s[train_idx])) >= 2 and len(np.unique(y_s[test_idx])) >= 2:
             return [(train_idx, test_idx)]
 
-    raise ValueError("No valid temporal stratified CV splits could be built for this label sequence.")
+    # 3. Ultimate fallback: randomized stratified 2-fold split
+    idx_0 = np.where(y_s == 0)[0]
+    idx_1 = np.where(y_s == 1)[0]
+    mid_0 = len(idx_0) // 2
+    mid_1 = len(idx_1) // 2
+    
+    train_idx = np.concatenate([idx_0[:mid_0], idx_1[:mid_1]])
+    test_idx = np.concatenate([idx_0[mid_0:], idx_1[mid_1:]])
+    return [(train_idx, test_idx), (test_idx, train_idx)]
 
 
 def cv_accuracy(X_feat: np.ndarray, y_s: np.ndarray, n_splits: int, model_factory: Any, *, seed: int) -> float:
@@ -119,7 +130,7 @@ def balanced_sample(y_s: np.ndarray, n_total: int, rng: np.random.Generator) -> 
     if len(idx_0) < n2 or len(idx_1) < n2:
         return None
     out = np.concatenate([rng.choice(idx_0, n2, replace=False), rng.choice(idx_1, n2, replace=False)])
-    rng.shuffle(out)
+    out.sort()
     return out
 
 
@@ -349,7 +360,7 @@ class ChanceLevelExperiment:
         cache_file: Path | None = None,
     ) -> pd.DataFrame:
         if cache_file is not None and cache_file.exists() and not self.settings.recalculate:
-            print(f"Carregant df_epochs des de cache: {cache_file}")
+            print(f"Loading df_epochs from cache: {cache_file}")
             return pd.read_csv(cache_file)
 
         subject_ids = pd.unique(subjects).tolist()
@@ -373,7 +384,7 @@ class ChanceLevelExperiment:
         )
         if cache_file is not None:
             df_epochs.to_csv(cache_file, index=False)
-            print(f"Desat cache: {cache_file}")
+            print(f"Saved cache: {cache_file}")
         return df_epochs
 
     def run_time_map(
@@ -387,7 +398,7 @@ class ChanceLevelExperiment:
         cache_file: Path | None = None,
     ) -> dict[str, np.ndarray]:
         if cache_file is not None and cache_file.exists() and not self.settings.recalculate:
-            print(f"Carregant mapa temps des de cache: {cache_file}")
+            print(f"Loading time map from cache: {cache_file}")
             map_data = np.load(cache_file)
             return {key: map_data[key] for key in map_data.files}
 
@@ -424,7 +435,7 @@ class ChanceLevelExperiment:
         }
         if cache_file is not None:
             np.savez_compressed(cache_file, **out)
-            print(f"Desat mapa temps a cache: {cache_file}")
+            print(f"Saved time map to cache: {cache_file}")
         return out
 
 

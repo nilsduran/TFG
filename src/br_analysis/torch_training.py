@@ -10,7 +10,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    balanced_accuracy_score,
+    precision_recall_curve,
+    roc_auc_score,
+    roc_curve,
+    auc,
+)
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
@@ -129,7 +137,7 @@ def fit_one_split(
     config: TorchTrainConfig,
     *,
     save_path: Path | None = None,
-) -> tuple[dict[str, float], pd.DataFrame]:
+) -> tuple[dict[str, float], pd.DataFrame, np.ndarray, np.ndarray]:
     split_start = time.perf_counter()
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda" and not torch.cuda.is_available():
@@ -237,7 +245,7 @@ def fit_one_split(
     gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    return metrics, pd.DataFrame(history)
+    return metrics, pd.DataFrame(history), y_true, p_test
 
 
 def cross_validate_torch_model(
@@ -251,6 +259,9 @@ def cross_validate_torch_model(
     save_weights_dir: Path | None = None,
     weights_prefix: str | None = None,
     load_weights: bool = False,
+    plot_roc_pr: bool = False,
+    figures_dir: Path | None = None,
+    task_tag: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if subject_id is not None:
         if subjects is None:
@@ -276,6 +287,8 @@ def cross_validate_torch_model(
     rows = []
     histories = []
     fold_times: list[float] = []
+    all_fold_y_true: list[np.ndarray] = []
+    all_fold_p_test: list[np.ndarray] = []
     cv_start = time.perf_counter()
     # Optionally show fold progress
     try:
@@ -321,6 +334,8 @@ def cross_validate_torch_model(
                 "fold": fold,
             }
             rows.append(metrics)
+            all_fold_y_true.append(y_true_arr)
+            all_fold_p_test.append(p_test)
             
             history = pd.DataFrame([{
                 "epoch": 1,
@@ -345,11 +360,13 @@ def cross_validate_torch_model(
 
         X_train, X_test = standardize_train_test(X[train_idx], X[test_idx])
         y_train, y_test = y[train_idx], y[test_idx]
-        metrics, history = fit_one_split(
+        metrics, history, fold_y_true, fold_p_test = fit_one_split(
             make_model, X_train, y_train, X_test, y_test, config, save_path=fold_weights_path
         )
         metrics["fold"] = fold
         rows.append(metrics)
+        all_fold_y_true.append(fold_y_true)
+        all_fold_p_test.append(fold_p_test)
         history["fold"] = fold
         histories.append(history)
         fold_seconds = time.perf_counter() - fold_start
@@ -362,7 +379,142 @@ def cross_validate_torch_model(
             f"Fold {fold}: acc={metrics['test_acc']:.3f}, bal_acc={metrics['test_balanced_acc']:.3f}, auc={metrics['test_auc']:.3f} "
             f"| fold_time={_format_seconds(fold_seconds)} elapsed_cv={_format_seconds(elapsed_cv)} eta_cv={_format_seconds(eta_cv)}"
         )
+
+    if all_fold_y_true:
+        y_true_all = np.concatenate(all_fold_y_true)
+        p_test_all = np.concatenate(all_fold_p_test)
+        y_pred_all = (p_test_all >= 0.5).astype(int)
+        
+        from sklearn.metrics import classification_report
+        print("\n" + "="*60)
+        print("OVERALL CROSS-VALIDATION CLASSIFICATION REPORT (AGGREGATED)")
+        print("="*60)
+        print(classification_report(y_true_all, y_pred_all))
+        print("="*60 + "\n")
+
+    # ── ROC-AUC & PR-AUC plots ──────────────────────────────────────────
+    if plot_roc_pr and all_fold_y_true:
+        _plot_roc_pr_curves(
+            all_fold_y_true, all_fold_p_test,
+            figures_dir=figures_dir, task_tag=task_tag,
+        )
+
     return pd.DataFrame(rows), pd.concat(histories, ignore_index=True)
+
+
+def _plot_roc_pr_curves(
+    all_fold_y_true: list[np.ndarray],
+    all_fold_p_test: list[np.ndarray],
+    *,
+    figures_dir: Path | None = None,
+    task_tag: str | None = None,
+) -> None:
+    """Generate and save ROC-AUC and PR-AUC curve plots across folds."""
+    cmap = plt.cm.get_cmap("tab10")
+    n_folds = len(all_fold_y_true)
+    common_grid = np.linspace(0.0, 1.0, 100)
+
+    # ── ROC Curve ────────────────────────────────────────────────────────
+    fig_roc, ax_roc = plt.subplots(figsize=(7, 6))
+    tpr_interps: list[np.ndarray] = []
+    roc_aucs: list[float] = []
+
+    for i in range(n_folds):
+        fpr_i, tpr_i, _ = roc_curve(all_fold_y_true[i], all_fold_p_test[i])
+        roc_auc_i = auc(fpr_i, tpr_i)
+        roc_aucs.append(roc_auc_i)
+        ax_roc.plot(
+            fpr_i, tpr_i,
+            color=cmap(i), alpha=0.3, linewidth=1,
+            label=f"Fold {i + 1} (AUC = {roc_auc_i:.3f})",
+        )
+        tpr_interp = np.interp(common_grid, fpr_i, tpr_i)
+        tpr_interp[0] = 0.0
+        tpr_interps.append(tpr_interp)
+
+    mean_tpr = np.mean(tpr_interps, axis=0)
+    mean_tpr[-1] = 1.0
+    std_tpr = np.std(tpr_interps, axis=0)
+    mean_auc = float(np.mean(roc_aucs))
+    std_auc = float(np.std(roc_aucs))
+
+    ax_roc.plot(
+        common_grid, mean_tpr, color="navy", linewidth=2,
+        label=f"Mean ROC (AUC = {mean_auc:.3f} ± {std_auc:.3f})",
+    )
+    ax_roc.fill_between(
+        common_grid,
+        np.clip(mean_tpr - std_tpr, 0, 1),
+        np.clip(mean_tpr + std_tpr, 0, 1),
+        color="navy", alpha=0.15,
+    )
+    ax_roc.plot([0, 1], [0, 1], linestyle="--", color="grey", linewidth=1, label="Chance")
+    ax_roc.set_xlabel("False Positive Rate")
+    ax_roc.set_ylabel("True Positive Rate")
+    ax_roc.set_title("ROC Curve (Cross-Validation)")
+    ax_roc.legend(loc="lower right", fontsize=8)
+    ax_roc.set_xlim([-0.02, 1.02])
+    ax_roc.set_ylim([-0.02, 1.02])
+    ax_roc.grid(True, alpha=0.3)
+    fig_roc.tight_layout()
+
+    if figures_dir is not None:
+        tag = task_tag or "model"
+        fig_roc.savefig(Path(figures_dir) / f"roc_auc_{tag}.png", dpi=300, bbox_inches="tight")
+    plt.show()
+
+    # ── PR Curve ─────────────────────────────────────────────────────────
+    fig_pr, ax_pr = plt.subplots(figsize=(7, 6))
+    prec_interps: list[np.ndarray] = []
+    pr_aucs: list[float] = []
+    baselines: list[float] = []
+
+    for i in range(n_folds):
+        prec_i, rec_i, _ = precision_recall_curve(all_fold_y_true[i], all_fold_p_test[i])
+        ap_i = average_precision_score(all_fold_y_true[i], all_fold_p_test[i])
+        pr_aucs.append(ap_i)
+        baselines.append(float(np.mean(all_fold_y_true[i])))
+        ax_pr.plot(
+            rec_i, prec_i,
+            color=cmap(i), alpha=0.3, linewidth=1,
+            label=f"Fold {i + 1} (AP = {ap_i:.3f})",
+        )
+        # Reverse so recall is monotonically increasing for interp
+        rec_rev = rec_i[::-1]
+        prec_rev = prec_i[::-1]
+        prec_interp = np.interp(common_grid, rec_rev, prec_rev)
+        prec_interps.append(prec_interp)
+
+    mean_prec = np.mean(prec_interps, axis=0)
+    std_prec = np.std(prec_interps, axis=0)
+    mean_ap = float(np.mean(pr_aucs))
+    std_ap = float(np.std(pr_aucs))
+    baseline = float(np.mean(baselines))
+
+    ax_pr.plot(
+        common_grid, mean_prec, color="darkgreen", linewidth=2,
+        label=f"Mean PR (AP = {mean_ap:.3f} ± {std_ap:.3f})",
+    )
+    ax_pr.fill_between(
+        common_grid,
+        np.clip(mean_prec - std_prec, 0, 1),
+        np.clip(mean_prec + std_prec, 0, 1),
+        color="darkgreen", alpha=0.15,
+    )
+    ax_pr.axhline(y=baseline, linestyle="--", color="grey", linewidth=1, label=f"Baseline ({baseline:.2f})")
+    ax_pr.set_xlabel("Recall")
+    ax_pr.set_ylabel("Precision")
+    ax_pr.set_title("Precision-Recall Curve (Cross-Validation)")
+    ax_pr.legend(loc="lower left", fontsize=8)
+    ax_pr.set_xlim([-0.02, 1.02])
+    ax_pr.set_ylim([-0.02, 1.05])
+    ax_pr.grid(True, alpha=0.3)
+    fig_pr.tight_layout()
+
+    if figures_dir is not None:
+        tag = task_tag or "model"
+        fig_pr.savefig(Path(figures_dir) / f"pr_auc_{tag}.png", dpi=300, bbox_inches="tight")
+    plt.show()
 
 
 def plot_torch_history(history: pd.DataFrame, *, output_file: Path | None = None) -> None:

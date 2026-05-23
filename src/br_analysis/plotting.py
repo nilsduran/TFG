@@ -198,7 +198,7 @@ def compute_gradient_saliency(
     device: str = "cpu",
     mode: str = "input_grad",
 ) -> np.ndarray:
-    """Calcula la rellevància temporal-espacial usant els gradients de PyTorch."""
+    """Calculate temporal-spatial relevance using PyTorch gradients."""
     import torch
 
     model.eval()
@@ -213,7 +213,7 @@ def compute_gradient_saliency(
     # Forward pass
     logits = model(X_tensor)
     
-    # Agafem les puntuacions de la classe correcte/desitjada
+    # Get scores of the correct/desired class
     y_tensor = torch.as_tensor(y, dtype=torch.long, device=device_obj)
     scores = logits[torch.arange(len(y_tensor)), y_tensor]
     
@@ -243,12 +243,12 @@ def plot_eeg_topomap(
     output_file: Path | None = None,
     show: bool = True,
 ) -> None:
-    """Dibuixa un topomap 2D del cap a partir de pesos de canals usant MNE."""
+    """Draw a 2D topomap of the head from channel weights using MNE."""
     import mne
     import matplotlib.pyplot as plt
 
     if info is None:
-        # Creem info mínima amb montage estàndard
+        # Create minimal info with standard montage
         info = mne.create_info(ch_names=list(ch_names), sfreq=128.0, ch_types="eeg")
         montage = mne.channels.make_standard_montage("standard_1005")
         info.set_montage(montage, on_missing="ignore")
@@ -279,7 +279,7 @@ def plot_attention_heatmap(
     output_file: Path | None = None,
     show: bool = True,
 ) -> None:
-    """Dibuixa un heatmap dels pesos d'atenció d'un Transformer."""
+    """Draw a heatmap of attention weights of a Transformer."""
     fig, ax = plt.subplots(figsize=(6, 5))
     sns.heatmap(
         attention,

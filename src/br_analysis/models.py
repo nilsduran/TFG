@@ -28,6 +28,7 @@ class SafeLogisticRegressionCV(LogisticRegressionCV):
                 solver=self.solver,
                 max_iter=self.max_iter,
                 random_state=self.random_state,
+                class_weight=self.class_weight,
             )
             clf.fit(X, y, sample_weight=sample_weight, **params)
             self.classes_ = clf.classes_
@@ -75,6 +76,7 @@ class LogRegModelFactory:
                 max_iter=2000,
                 random_state=self.random_seed,
                 refit=True,
+                class_weight="balanced",
             ),
         )
 
@@ -94,5 +96,5 @@ class RiemannLdaModelFactory:
         return make_pipeline(
             Covariances(estimator="oas"),
             TangentSpace(metric="riemann"),
-            LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto"),
+            LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto", priors=np.array([0.5, 0.5])),
         )

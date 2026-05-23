@@ -48,7 +48,7 @@ def _read_eeg_epochs(fif_path: Path, *, preload: bool = True) -> mne.Epochs:
     temp_fif_path = temp_dir / f"temp_eeg_{os.getpid()}_{fif_path.name}"
     shutil.copy(fif_path, temp_fif_path)
 
-    # Sempre obrim amb preload=False inicialment
+    # Always open with preload=False initially
     ep = mne.read_epochs(temp_fif_path, preload=False)
     if preload:
         ep.load_data()
@@ -57,7 +57,7 @@ def _read_eeg_epochs(fif_path: Path, *, preload: bool = True) -> mne.Epochs:
         except Exception:
             pass
     else:
-        # Netegem automàticament quan l'objecte Epochs es destrueixi
+        # Clean up automatically when the Epochs object is destroyed
         def _cleanup(p: str):
             try:
                 if os.path.exists(p):
