@@ -224,7 +224,7 @@ def _process_channel_subject(
             if progress_dir:
                 try:
                     with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
-                        f.write(f"{completed / total_subtasks:.6f}")
+                        f.write(f"{completed / total_subtasks:.2f}")
                 except Exception:
                     pass
     return real_arr, surr_mean, surr_q95
@@ -281,7 +281,7 @@ def _process_tensor_subject(
             if progress_dir:
                 try:
                     with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
-                        f.write(f"{completed / total_subtasks:.6f}")
+                        f.write(f"{completed / total_subtasks:.2f}")
                 except Exception:
                     pass
     return real_arr, surr_mean, surr_q95
@@ -339,7 +339,7 @@ def _epochs_channel_worker(
             if progress_dir:
                 try:
                     with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
-                        f.write(f"{completed / total_subtasks:.6f}")
+                        f.write(f"{completed / total_subtasks:.2f}")
                 except Exception:
                     pass
     return rows
@@ -396,7 +396,7 @@ def _epochs_tensor_worker(
             if progress_dir:
                 try:
                     with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
-                        f.write(f"{completed / total_subtasks:.6f}")
+                        f.write(f"{completed / total_subtasks:.2f}")
                 except Exception:
                     pass
     return rows
