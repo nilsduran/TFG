@@ -124,7 +124,7 @@ def get_task_config(
             class_0="Congruent",
             class_1="Incongruent_Pure",
             event_codes={"Congruent": [1, 2], "Incongruent_Pure": [3, 4, 5, 6]},
-            selected_subjects_csv=analysis_root / "01_exploracio" / "tables" / "subjectes_seleccionats.csv",
+            selected_subjects_csv=analysis_root / "exploration" / "tables" / "subjectes_seleccionats.csv",
             max_subjects=24,
             undersample_classes=True,
             analysis_window=analysis_window or (0.0, 1.5),
@@ -135,7 +135,7 @@ def get_task_config(
             class_0="Incongruent_Mixed",
             class_1="Incongruent_Pure",
             event_codes={"Incongruent_Mixed": [7, 8], "Incongruent_Pure": [3, 4, 5, 6]},
-            selected_subjects_csv=analysis_root / "01_exploracio" / "tables" / "subjectes_seleccionats_im_vs_ip.csv",
+            selected_subjects_csv=analysis_root / "exploration" / "tables" / "subjectes_seleccionats_im_vs_ip.csv",
             max_subjects=29,
             undersample_classes=True,
             analysis_window=analysis_window or (0.0, 1.5),
@@ -152,4 +152,3 @@ def get_epochs_grid(task_name: str) -> list[int]:
         return [20, 40, 60, 100, 150, 200, 240, 270]
     else:
         raise ValueError(f"Unknown task name: {task_name}")
-

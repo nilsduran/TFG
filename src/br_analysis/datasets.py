@@ -32,7 +32,8 @@ class LoadedDataset:
 
 def _subject_ids(csv_path: Path, max_subjects: int | None) -> list[str]:
     df_sel = pd.read_csv(csv_path)
-    ids = df_sel["subjecte"].dropna().astype(str).tolist()
+    col = "subject" if "subject" in df_sel.columns else "subjecte"
+    ids = df_sel[col].dropna().astype(str).tolist()
     ids = list(dict.fromkeys(ids))
     return ids[:max_subjects] if max_subjects is not None else ids
 
@@ -211,7 +212,7 @@ def load_fused_band_dataset(
             skipped.append(f"{subj_name}: .fif file not found")
             continue
 
-        ep = _read_eeg_epochs(fif_path, preload=False)
+        ep = _read_eeg_epochs(fif_path, preload=True)
         ep, y_s, reason = _select_binary_epochs(ep, task)
         if ep is None or y_s is None:
             skipped.append(f"{fif_path.name}: {reason}")
