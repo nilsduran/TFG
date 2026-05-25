@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import gc
 import time
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
 import torch
 from sklearn.metrics import (
     accuracy_score,
@@ -22,7 +24,7 @@ from sklearn.metrics import (
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from .experiments import temporal_stratified_splits
+from .experiments import temporal_stratified_splits, balanced_sample
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,12 @@ def _evaluate(
     pred = (p_arr >= 0.5).astype(int)
     return float(np.mean(losses)), float(accuracy_score(y_arr, pred)), y_arr, p_arr
 
+def _instantiate_model(make_model: Callable, X: np.ndarray) -> nn.Module:
+    sig = inspect.signature(make_model)
+    if len(sig.parameters) > 0:
+        return make_model(X.shape[1], X.shape[2])
+    return make_model()
+
 
 def fit_one_split(
     make_model: Callable[[], nn.Module],
@@ -152,7 +160,7 @@ def fit_one_split(
     val_loader = build_dataloader(X_val, y_val, batch_size=config.batch_size, shuffle=False, device=device)
     test_loader = build_dataloader(X_test, y_test, batch_size=config.batch_size, shuffle=False, device=device)
 
-    model = make_model().to(device)
+    model = _instantiate_model(make_model, X_train).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     loss_fn = nn.CrossEntropyLoss()
     best_state = None
@@ -168,8 +176,10 @@ def fit_one_split(
         _tqdm = None
 
     epoch_iter = range(1, config.epochs + 1)
+    pbar = None
     if config.progress and _tqdm is not None:
-        epoch_iter = _tqdm(epoch_iter, desc="Epochs")
+        pbar = _tqdm(epoch_iter, desc="Epochs", leave=False)
+        epoch_iter = pbar
 
     for epoch in epoch_iter:
         epoch_start = time.perf_counter()
@@ -213,12 +223,20 @@ def fit_one_split(
             epochs_left = max(0, config.epochs - epoch)
             split_elapsed = time.perf_counter() - split_start
             split_eta = avg_epoch * epochs_left
-            print(
-                f"Epoch {epoch}/{config.epochs} | "
-                f"train_loss={history[-1]['train_loss']:.4f} val_acc={val_acc:.4f} | "
-                f"epoch={_format_seconds(epoch_seconds)} elapsed={_format_seconds(split_elapsed)} "
-                f"eta_split={_format_seconds(split_eta)}"
-            )
+            if pbar is not None:
+                pbar.set_postfix({
+                    "loss": f"{history[-1]['train_loss']:.4f}",
+                    "val_acc": f"{val_acc:.4f}",
+                    "elapsed": _format_seconds(split_elapsed),
+                    "eta": _format_seconds(split_eta)
+                })
+            else:
+                print(
+                    f"Epoch {epoch}/{config.epochs} | "
+                    f"train_loss={history[-1]['train_loss']:.4f} val_acc={val_acc:.4f} | "
+                    f"epoch={_format_seconds(epoch_seconds)} elapsed={_format_seconds(split_elapsed)} "
+                    f"eta_split={_format_seconds(split_eta)}"
+                )
 
     if best_state is not None:
         model.load_state_dict(best_state)
@@ -310,7 +328,7 @@ def cross_validate_torch_model(
 
         if load_weights and fold_weights_path is not None and fold_weights_path.exists():
             print(f"Fold {fold}: Loading weights from {fold_weights_path}")
-            model = make_model().to(device)
+            model = _instantiate_model(make_model, X).to(device)
             model.load_state_dict(torch.load(fold_weights_path, map_location=device))
             
             _, X_test = standardize_train_test(X[train_idx], X[test_idx])
@@ -552,3 +570,161 @@ def plot_fold_metrics(metrics: pd.DataFrame, *, output_file: Path | None = None)
     if output_file is not None:
         plt.savefig(output_file, dpi=150, bbox_inches="tight")
     plt.show()
+
+
+def run_torch_epochs_grid(
+    X: np.ndarray,
+    y: np.ndarray,
+    make_model: Callable[[], nn.Module],
+    config: TorchTrainConfig,
+    epochs_grid: Sequence[int],
+    n_repeats: int,
+    *,
+    subjects: np.ndarray | None = None,
+    subject_id: str | None = None,
+    random_seed: int = 42,
+) -> pd.DataFrame:
+    """Run cross-validation on PyTorch models for subsets of epochs to draw learning curves.
+
+    Uses analytical binomial chance levels to save 100% of permutation cost.
+    """
+    import scipy.stats as stats
+    from .experiments import choose_n_splits
+
+    if subject_id is not None:
+        if subjects is None:
+            raise ValueError("subjects must be provided when subject_id is set.")
+        mask = np.asarray(subjects) == subject_id
+        X = X[mask]
+        y = y[mask]
+        print(f"[Epochs Grid] Filtering to subject {subject_id}: {len(y)} epochs")
+
+    rng = np.random.default_rng(random_seed)
+    rows = []
+    
+    n_splits = config.n_splits
+    
+    for n_total in epochs_grid:
+        if n_total % 2 != 0:
+            continue
+        
+        # Test size per fold in chronological CV: approximately n_total / (n_splits + 1)
+        test_size_est = max(1, n_total // (n_splits + 1))
+        
+        # Free analytical chance levels
+        chance_mean = 0.5
+        chance_q95 = float(stats.binom.ppf(0.95, test_size_est, 0.5) / test_size_est)
+        
+        real_accs = []
+        for rep in range(n_repeats):
+            idx_sub = balanced_sample(y, n_total, rng)
+            if idx_sub is None:
+                continue
+            X_sub = X[idx_sub]
+            y_sub = y[idx_sub]
+            
+            silent_config = TorchTrainConfig(
+                epochs=config.epochs,
+                batch_size=config.batch_size,
+                lr=config.lr,
+                weight_decay=config.weight_decay,
+                patience=config.patience,
+                n_splits=config.n_splits,
+                val_size=config.val_size,
+                random_seed=random_seed + rep,
+                device=config.device,
+                progress=False,
+                l1_lambda=config.l1_lambda,
+            )
+            cv_metrics, _ = cross_validate_torch_model(
+                X_sub, y_sub, make_model, silent_config
+            )
+            real_accs.append(cv_metrics["test_acc"].mean())
+            
+        if not real_accs:
+            continue
+            
+        real_mean = float(np.mean(real_accs))
+        real_std = float(np.std(real_accs))
+        
+        rows.append({
+            "subject": subject_id or "all",
+            "n_epochs_total": int(n_total),
+            "acc_real_mean": real_mean,
+            "acc_real_std": real_std,
+            "acc_chance_mean": chance_mean,
+            "acc_chance_q95": chance_q95,
+            "delta_acc": real_mean - chance_mean,
+            "delta_acc_q95": real_mean - chance_q95,
+        })
+        print(f"Grid point {n_total} epochs: acc={real_mean:.3f} ± {real_std:.3f} | chance Q95={chance_q95:.3f}")
+        
+    return pd.DataFrame(rows)
+
+
+def run_torch_time_map(
+    X: np.ndarray,
+    y: np.ndarray,
+    make_model: Callable[[], nn.Module],
+    config: TorchTrainConfig,
+    windows: Any,
+    *,
+    subjects: np.ndarray | None = None,
+    subject_id: str | None = None,
+) -> dict[str, np.ndarray]:
+    """Train PyTorch model on sliding time windows to draw accuracy map over time."""
+    import scipy.stats as stats
+    
+    if subject_id is not None:
+        if subjects is None:
+            raise ValueError("subjects must be provided when subject_id is set.")
+        mask = np.asarray(subjects) == subject_id
+        X = X[mask]
+        y = y[mask]
+        print(f"[Time Map] Filtering to subject {subject_id}: {len(y)} epochs")
+
+    n_windows = len(windows.starts)
+    real_map = np.empty(n_windows, dtype=np.float32)
+    surr_mean = np.empty(n_windows, dtype=np.float32)
+    surr_q95 = np.empty(n_windows, dtype=np.float32)
+    
+    # Calculate test size for analytical Q95
+    n_splits = config.n_splits
+    n_total = len(y)
+    test_size_est = max(1, n_total // (n_splits + 1))
+    chance_mean = 0.5
+    chance_q95 = float(stats.binom.ppf(0.95, test_size_est, 0.5) / test_size_est)
+
+    for wi, (start, stop) in enumerate(zip(windows.starts, windows.stops)):
+        print(f"Training Time Window {wi+1}/{n_windows} (center {windows.centers[wi]:.3f}s) ...")
+        X_win = X[:, :, start:stop]
+        
+        silent_config = TorchTrainConfig(
+            epochs=config.epochs,
+            batch_size=config.batch_size,
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            patience=config.patience,
+            n_splits=config.n_splits,
+            val_size=config.val_size,
+            random_seed=config.random_seed + wi,
+            device=config.device,
+            progress=False,
+            l1_lambda=config.l1_lambda,
+        )
+        cv_metrics, _ = cross_validate_torch_model(
+            X_win, y, make_model, silent_config
+        )
+        acc = cv_metrics["test_acc"].mean()
+        real_map[wi] = acc
+        surr_mean[wi] = chance_mean
+        surr_q95[wi] = chance_q95
+        print(f"Window {wi+1} Acc: {acc:.3f} | Chance Q95: {chance_q95:.3f}")
+        
+    return {
+        "real_map": real_map,
+        "surr_mean": surr_mean,
+        "surr_q95": surr_q95,
+        "centers": windows.centers,
+    }
+

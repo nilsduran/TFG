@@ -1,14 +1,58 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
+import tempfile
+import threading
+import time
 from typing import Any, Callable, Sequence
 
+import joblib
+from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
-from joblib import Parallel, delayed
 from scipy.stats import ttest_rel
+from tqdm.auto import tqdm
 from .features import HilbertMeanEnvelope
+
+
+class ProgressTracker(threading.Thread):
+    def __init__(self, progress_dir: str, total_ticks: int, pbar: tqdm):
+        super().__init__(daemon=True)
+        self.progress_dir = Path(progress_dir)
+        self.total_ticks = total_ticks
+        self.pbar = pbar
+        self.stop_event = threading.Event()
+
+    def run(self):
+        while not self.stop_event.is_set():
+            time.sleep(10)
+            self._update_progress()
+        # Final update
+        self._update_progress()
+
+    def _update_progress(self):
+        try:
+            if not self.progress_dir.exists():
+                return
+            files = list(self.progress_dir.glob("*.progress"))
+            total_completed = 0.0
+            for f in files:
+                try:
+                    with open(f, "r") as pf:
+                        val = float(pf.read().strip())
+                        total_completed += val
+                except Exception:
+                    pass
+            self.pbar.n = min(total_completed, self.total_ticks)
+            self.pbar.refresh()
+        except Exception:
+            pass
+
+    def stop(self):
+        self.stop_event.set()
 
 
 @dataclass(frozen=True)
@@ -54,12 +98,12 @@ def temporal_stratified_splits(y_s: np.ndarray, n_splits: int) -> list[tuple[np.
     only one class), this function dynamically falls back to lower split counts (down to 2).
     If that still fails, it searches for a single split point that yields valid binary
     train and test partitions.
-    
-    As an ultimate fallback (e.g. for degenerate randomized permutations where one class 
+
+    As an ultimate fallback (e.g. for degenerate randomized permutations where one class
     completely precedes the other), it returns a randomized stratified 2-fold split.
     """
     y_s = np.asarray(y_s)
-    
+
     # 1. Try with decreasing number of splits down to 2
     for current_splits in range(n_splits, 1, -1):
         indices = np.arange(len(y_s))
@@ -89,7 +133,7 @@ def temporal_stratified_splits(y_s: np.ndarray, n_splits: int) -> list[tuple[np.
     idx_1 = np.where(y_s == 1)[0]
     mid_0 = len(idx_0) // 2
     mid_1 = len(idx_1) // 2
-    
+
     train_idx = np.concatenate([idx_0[:mid_0], idx_1[:mid_1]])
     test_idx = np.concatenate([idx_0[mid_0:], idx_1[mid_1:]])
     return [(train_idx, test_idx), (test_idx, train_idx)]
@@ -146,6 +190,7 @@ def _process_channel_subject(
     settings: ExperimentSettings,
     model_factory: Any,
     feature_extractor: Any,
+    progress_dir: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     idx_s = np.where(subj_list_all == subj)[0]
     Xs, ys = X_all[idx_s], y_all[idx_s]
@@ -153,18 +198,35 @@ def _process_channel_subject(
     surr_mean = np.full_like(real_arr, np.nan)
     surr_q95 = np.full_like(real_arr, np.nan)
     if len(np.unique(ys)) < 2:
+        if progress_dir:
+            try:
+                with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
+                    f.write("1.000000")
+            except Exception:
+                pass
         return real_arr, surr_mean, surr_q95
 
     n_splits = choose_n_splits(ys, max_splits=settings.map_cv_max_splits)
     base_seed = settings.random_seed + 10_000 * (si + 1)
+    completed = 0
+    total_subtasks = len(channel_names) * len(starts)
     for ch_idx in range(len(channel_names)):
         for wi, (s, e) in enumerate(zip(starts, stops)):
             X_feat = feature_extractor.transform(Xs[:, ch_idx, s:e])
             win_seed = base_seed + wi * 1000 + ch_idx
             real_arr[ch_idx, wi] = cv_accuracy(X_feat, ys, n_splits, model_factory, seed=win_seed)
-            dist = surrogate_distribution(X_feat, ys, n_splits, settings.n_perm_surrogate, model_factory, seed=win_seed + 1)
+            dist = surrogate_distribution(
+                X_feat, ys, n_splits, settings.n_perm_surrogate, model_factory, seed=win_seed + 1
+            )
             surr_mean[ch_idx, wi] = float(dist.mean())
             surr_q95[ch_idx, wi] = float(np.quantile(dist, 0.95))
+            completed += 1
+            if progress_dir:
+                try:
+                    with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
+                        f.write(f"{completed / total_subtasks:.6f}")
+                except Exception:
+                    pass
     return real_arr, surr_mean, surr_q95
 
 
@@ -179,6 +241,7 @@ def _process_tensor_subject(
     stops: np.ndarray,
     settings: ExperimentSettings,
     model_factory: Any,
+    progress_dir: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     idx_s = np.where(subj_list_all == subj)[0]
     ys = y_all[idx_s]
@@ -186,10 +249,18 @@ def _process_tensor_subject(
     surr_mean = np.full_like(real_arr, np.nan)
     surr_q95 = np.full_like(real_arr, np.nan)
     if len(np.unique(ys)) < 2:
+        if progress_dir:
+            try:
+                with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
+                    f.write("1.000000")
+            except Exception:
+                pass
         return real_arr, surr_mean, surr_q95
 
     n_splits = choose_n_splits(ys, max_splits=settings.map_cv_max_splits)
     base_seed = settings.random_seed + 10_000 * (si + 1)
+    completed = 0
+    total_subtasks = len(band_names) * len(starts)
     for b_idx, band in enumerate(band_names):
         Xs_band = X_dict[band][idx_s]
         for wi, (s, e) in enumerate(zip(starts, stops)):
@@ -206,6 +277,13 @@ def _process_tensor_subject(
             )
             surr_mean[b_idx, wi] = float(dist.mean())
             surr_q95[b_idx, wi] = float(np.quantile(dist, 0.95))
+            completed += 1
+            if progress_dir:
+                try:
+                    with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
+                        f.write(f"{completed / total_subtasks:.6f}")
+                except Exception:
+                    pass
     return real_arr, surr_mean, surr_q95
 
 
@@ -219,15 +297,24 @@ def _epochs_channel_worker(
     settings: ExperimentSettings,
     model_factory: Any,
     feature_extractor: Any,
+    progress_dir: str | None = None,
 ) -> list[dict[str, Any]]:
     idx_s = np.where(subj_list_all == subj)[0]
     Xs, ys = X_all[idx_s], y_all[idx_s]
     if len(np.unique(ys)) < 2:
+        if progress_dir:
+            try:
+                with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
+                    f.write("1.000000")
+            except Exception:
+                pass
         return []
 
     rows = []
     rng = np.random.default_rng(settings.random_seed + si * 9973)
     n_splits = choose_n_splits(ys, max_splits=settings.map_cv_max_splits)
+    completed = 0
+    total_subtasks = len(channel_names) * len(settings.epochs_grid)
     for ch_idx, ch_name in enumerate(channel_names):
         X_ch = Xs[:, ch_idx, :]
         for n_total in settings.epochs_grid:
@@ -248,6 +335,13 @@ def _epochs_channel_worker(
                     min_perm=max(20, settings.n_perm_surrogate // 5),
                 )
             )
+            completed += 1
+            if progress_dir:
+                try:
+                    with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
+                        f.write(f"{completed / total_subtasks:.6f}")
+                except Exception:
+                    pass
     return rows
 
 
@@ -260,15 +354,24 @@ def _epochs_tensor_worker(
     band_names: Sequence[str],
     settings: ExperimentSettings,
     model_factory: Any,
+    progress_dir: str | None = None,
 ) -> list[dict[str, Any]]:
     idx_s = np.where(subj_list_all == subj)[0]
     ys = y_all[idx_s]
     if len(np.unique(ys)) < 2:
+        if progress_dir:
+            try:
+                with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
+                    f.write("1.000000")
+            except Exception:
+                pass
         return []
 
     rows = []
     rng = np.random.default_rng(settings.random_seed + si * 9973)
     n_splits = choose_n_splits(ys, max_splits=settings.map_cv_max_splits)
+    completed = 0
+    total_subtasks = len(band_names) * len(settings.epochs_grid)
     for b_idx, band in enumerate(band_names):
         Xs_band = X_dict[band][idx_s]
         for n_total in settings.epochs_grid:
@@ -289,6 +392,13 @@ def _epochs_tensor_worker(
                     min_perm=max(50, settings.n_perm_surrogate // 10),
                 )
             )
+            completed += 1
+            if progress_dir:
+                try:
+                    with open(Path(progress_dir) / f"task_{si}.progress", "w") as f:
+                        f.write(f"{completed / total_subtasks:.6f}")
+                except Exception:
+                    pass
     return rows
 
 
@@ -319,9 +429,7 @@ def _epochs_rows_for_feature(
         X_feat = feature_fn(X_source[idx_sub])
         seed_r = settings.random_seed + si * 9973 + source_idx * 997 + n_total + rep
         real_accs.append(cv_accuracy(X_feat, ys[idx_sub], n_splits, model_factory, seed=seed_r))
-        perm_all.append(
-            surrogate_distribution(X_feat, ys[idx_sub], n_splits, min_perm, model_factory, seed=seed_r + 1)
-        )
+        perm_all.append(surrogate_distribution(X_feat, ys[idx_sub], n_splits, min_perm, model_factory, seed=seed_r + 1))
 
     if not real_accs:
         return []
@@ -344,6 +452,24 @@ def _epochs_rows_for_feature(
     ]
 
 
+@contextlib.contextmanager
+def tqdm_joblib(tqdm_object):
+    """Context manager to patch joblib to report into tqdm progress bar"""
+
+    class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
+        def __call__(self, *args, **kwargs):
+            tqdm_object.update(self.batch_size)
+            return super().__call__(*args, **kwargs)
+
+    old_batch_callback = joblib.parallel.BatchCompletionCallBack
+    joblib.parallel.BatchCompletionCallBack = TqdmBatchCompletionCallback
+    try:
+        yield tqdm_object
+    finally:
+        joblib.parallel.BatchCompletionCallBack = old_batch_callback
+        tqdm_object.close()
+
+
 @dataclass
 class ChanceLevelExperiment:
     settings: ExperimentSettings
@@ -364,18 +490,45 @@ class ChanceLevelExperiment:
             return pd.read_csv(cache_file)
 
         subject_ids = pd.unique(subjects).tolist()
-        if isinstance(X, dict):
-            all_rows = Parallel(n_jobs=self.settings.n_jobs, verbose=5)(
-                delayed(_epochs_tensor_worker)(si, subj, X, y, subjects, labels, self.settings, self.model_factory)
-                for si, subj in enumerate(subject_ids)
-            )
-        else:
-            all_rows = Parallel(n_jobs=self.settings.n_jobs, verbose=5)(
-                delayed(_epochs_channel_worker)(
-                    si, subj, X, y, subjects, labels, self.settings, self.model_factory, self.feature_extractor
+        total_ticks = len(subject_ids)
+
+        progress_dir = tempfile.mkdtemp(prefix="br_progress_")
+        pbar = tqdm(total=total_ticks, desc=f"Epochs Grid ({self.settings.task_tag})")
+        tracker = ProgressTracker(progress_dir, total_ticks, pbar)
+        tracker.start()
+
+        try:
+            if isinstance(X, dict):
+                all_rows = Parallel(n_jobs=self.settings.n_jobs)(
+                    delayed(_epochs_tensor_worker)(
+                        si, subj, X, y, subjects, labels, self.settings, self.model_factory, progress_dir
+                    )
+                    for si, subj in enumerate(subject_ids)
                 )
-                for si, subj in enumerate(subject_ids)
-            )
+            else:
+                all_rows = Parallel(n_jobs=self.settings.n_jobs)(
+                    delayed(_epochs_channel_worker)(
+                        si,
+                        subj,
+                        X,
+                        y,
+                        subjects,
+                        labels,
+                        self.settings,
+                        self.model_factory,
+                        self.feature_extractor,
+                        progress_dir,
+                    )
+                    for si, subj in enumerate(subject_ids)
+                )
+        finally:
+            tracker.stop()
+            tracker.join(timeout=2.0)
+            pbar.n = total_ticks
+            pbar.refresh()
+            pbar.close()
+            with contextlib.suppress(Exception):
+                shutil.rmtree(progress_dir)
 
         df_epochs = (
             pd.DataFrame([r for rows in all_rows for r in rows])
@@ -403,30 +556,57 @@ class ChanceLevelExperiment:
             return {key: map_data[key] for key in map_data.files}
 
         subject_ids = pd.unique(subjects).tolist()
-        if isinstance(X, dict):
-            results = Parallel(n_jobs=self.settings.n_jobs)(
-                delayed(_process_tensor_subject)(
-                    si, subj, X, y, subjects, labels, windows.starts, windows.stops, self.settings, self.model_factory
+        total_ticks = len(subject_ids)
+
+        progress_dir = tempfile.mkdtemp(prefix="br_progress_")
+        pbar = tqdm(total=total_ticks, desc=f"Time Map ({self.settings.task_tag})")
+        tracker = ProgressTracker(progress_dir, total_ticks, pbar)
+        tracker.start()
+
+        try:
+            if isinstance(X, dict):
+                results = Parallel(n_jobs=self.settings.n_jobs)(
+                    delayed(_process_tensor_subject)(
+                        si,
+                        subj,
+                        X,
+                        y,
+                        subjects,
+                        labels,
+                        windows.starts,
+                        windows.stops,
+                        self.settings,
+                        self.model_factory,
+                        progress_dir,
+                    )
+                    for si, subj in enumerate(subject_ids)
                 )
-                for si, subj in enumerate(subject_ids)
-            )
-        else:
-            results = Parallel(n_jobs=self.settings.n_jobs)(
-                delayed(_process_channel_subject)(
-                    si,
-                    subj,
-                    X,
-                    y,
-                    subjects,
-                    labels,
-                    windows.starts,
-                    windows.stops,
-                    self.settings,
-                    self.model_factory,
-                    self.feature_extractor,
+            else:
+                results = Parallel(n_jobs=self.settings.n_jobs)(
+                    delayed(_process_channel_subject)(
+                        si,
+                        subj,
+                        X,
+                        y,
+                        subjects,
+                        labels,
+                        windows.starts,
+                        windows.stops,
+                        self.settings,
+                        self.model_factory,
+                        self.feature_extractor,
+                        progress_dir,
+                    )
+                    for si, subj in enumerate(subject_ids)
                 )
-                for si, subj in enumerate(subject_ids)
-            )
+        finally:
+            tracker.stop()
+            tracker.join(timeout=2.0)
+            pbar.n = total_ticks
+            pbar.refresh()
+            pbar.close()
+            with contextlib.suppress(Exception):
+                shutil.rmtree(progress_dir)
 
         out = {
             "real_map": np.stack([r[0] for r in results], axis=0),
