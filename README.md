@@ -71,6 +71,24 @@ graph TD
 
 The source code is organized into a modular helper library ([src/br_analysis](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis)), utility scripts, and Jupyter notebooks.
 
+### 📓 Jupyter Notebooks (`src/notebooks/`)
+
+* **[01_exploració_dades.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/01_exploraci%C3%B3_dades.ipynb)**: Performs initial exploratory analysis of the raw/preprocessed EEG signals, checking sampling frequencies, trial durations, balance of event codes, power spectral density (PSD), and event-related potentials (ERP).
+* **[02_classificació_simple.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/02_classificaci%C3%B3_simple.ipynb)**: Trains simple machine learning baselines (Logistic Regression, Random Forest, SVM) on raw envelope/power features extracted from fronto-medial theta and parieto-occipital alpha bands.
+* **[03_chance_level.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/03_chance_level.ipynb)**: Evaluates single-channel and multi-channel band envelope classifiers on the **Congruent vs. Incongruent Pure** task. Runs an epochs grid (evaluating model accuracy as a function of the number of trials) and a time-window map, using permutation shuffles to build empirical null distributions.
+* **[04_riemann.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/04_riemann.ipynb)**: Implements a decoding pipeline based on Riemannian geometry (covariance matrices projected onto the tangent space, classified using LDA) to distinguish **Congruent vs. Incongruent Pure** trials.
+* **[05_visualitzacions.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/05_visualitzacions.ipynb)**: Visualizes and compares the classical machine learning models' output, including subject learning curves, accuracy distributions, spatial scalp topographies, and statistical comparisons of classifier performance.
+* **[06_chance_level_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/06_chance_level_im_ip.ipynb)**: Applies the same feature-based decoding grid and permutation-testing pipeline from `03` to classify **Incongruent Mixed vs. Incongruent Pure** trials. *(Paired with `03_chance_level.ipynb`)*.
+* **[07_riemann_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/07_riemann_im_ip.ipynb)**: Applies the same Riemannian covariance and Tangent Space LDA classification pipeline from `04` to classify **Incongruent Mixed vs. Incongruent Pure** trials. *(Paired with `04_riemann.ipynb`)*.
+* **[08_clustering.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/08_clustering.ipynb)**: Implements data-driven spatiotemporal clustering using cluster-based permutation testing (Maris & Oostenveld, 2007) to identify statistically robust, contiguous groups of electrodes and active time windows for C vs IP and IM vs IP tasks in both Theta and Alpha bands, providing inputs for the focused EEGNet model.
+* **[09_EEGNet.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/09_EEGNet.ipynb)**: Builds, trains, and evaluates a 2D convolutional network (EEGNet) on the raw EEG trials for both C vs. IP and IM vs. IP classification tasks in Agnostic and focused Clustering configurations.
+* **[10_ST-GNN_ChebConv.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/10_ST-GNN_ChebConv.ipynb)**: Implements and trains a Spatio-Temporal Graph Neural Network using Chebyshev convolutions over the spatial electrode graph to decode binocular rivalry states. Features both backprop-based node saliency maps (one-sample t-test with FDR masking) and SHAP (`shap.GradientExplainer`) feature attributions.
+* **[11_ST-EEGFormer.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/11_ST-EEGFormer.ipynb)**: Trains and evaluates a Spatio-Temporal Transformer (ST-EEGFormer) model with spatial and temporal self-attention to classify **Congruent vs. Incongruent Pure** trials using LoRA adapters. Incorporates backprop spatial/temporal saliency gradients and SHAP (`shap.GradientExplainer`) explainability.
+* **[12_LaBraM.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/12_LaBraM.ipynb)**: Adapts and fine-tunes a Large Brain Model (LaBraM) pre-trained on massive EEG datasets, utilizing Low-Rank Adaptation (LoRA) to perform transfer learning on the rivalry dataset. Incorporates backprop spatial/temporal saliency gradients and SHAP (`shap.GradientExplainer`) explainability.
+* **[13_cross_model_comparison.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/13_cross_model_comparison.ipynb)**: Centralizes all cohort-wide cross-model benchmark comparisons across 8 model configurations (Logistic Regressions, Riemannian TS-LDA, EEGNet Agnostic, EEGNet Clustering, ST-GNN, ST-EEGFormer, and LaBraM). Computes global performance distributions, connected subject trajectory tracing, and pairwise Wilcoxon signed-rank significance matrix heatmaps with Benjamini-Hochberg FDR correction.
+
+---
+
 ### 🐍 Python Modules (`src/br_analysis/`)
 
 * **[__init__.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/__init__.py)**: Exposes public utilities, configurations, and loaders for importing into the notebooks.
@@ -87,24 +105,6 @@ The source code is organized into a modular helper library ([src/br_analysis](fi
 
 ---
 
-### 📓 Jupyter Notebooks (`src/notebooks/`)
-
-* **[01_exploració_dades.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/01_exploraci%C3%B3_dades.ipynb)**: Performs initial exploratory analysis of the raw/preprocessed EEG signals, checking sampling frequencies, trial durations, balance of event codes, power spectral density (PSD), and event-related potentials (ERP).
-* **[02_classificació_simple.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/02_classificaci%C3%B3_simple.ipynb)**: Trains simple machine learning baselines (Logistic Regression, Random Forest, SVM) on raw envelope/power features extracted from fronto-medial theta and parieto-occipital alpha bands.
-* **[03_chance_level.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/03_chance_level.ipynb)**: Evaluates single-channel and multi-channel band envelope classifiers on the **Congruent vs. Incongruent Pure** task. Runs an epochs grid (evaluating model accuracy as a function of the number of trials) and a time-window map, using permutation shuffles to build empirical null distributions.
-* **[06_chance_level_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/06_chance_level_im_ip.ipynb)**: Applies the same feature-based decoding grid and permutation-testing pipeline from `03` to classify **Incongruent Mixed vs. Incongruent Pure** trials. *(Paired with `03_chance_level.ipynb`)*.
-* **[04_riemann.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/04_riemann.ipynb)**: Implements a decoding pipeline based on Riemannian geometry (covariance matrices projected onto the tangent space, classified using LDA) to distinguish **Congruent vs. Incongruent Pure** trials.
-* **[07_riemann_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/07_riemann_im_ip.ipynb)**: Applies the same Riemannian covariance and Tangent Space LDA classification pipeline from `04` to classify **Incongruent Mixed vs. Incongruent Pure** trials. *(Paired with `04_riemann.ipynb`)*.
-* **[05_visualitzacions.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/05_visualitzacions.ipynb)**: Visualizes and compares the classical machine learning models' output, including subject learning curves, accuracy distributions, spatial scalp topographies, and statistical comparisons of classifier performance.
-* **[08_clustering.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/08_clustering.ipynb)**: Implements data-driven spatiotemporal clustering using cluster-based permutation testing (Maris & Oostenveld, 2007) to identify statistically robust, contiguous groups of electrodes and active time windows for C vs IP and IM vs IP tasks in both Theta and Alpha bands, providing inputs for the focused EEGNet model.
-* **[09_EEGNet.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/09_EEGNet.ipynb)**: Builds, trains, and evaluates a 2D convolutional network (EEGNet) on the raw EEG trials for both C vs. IP and IM vs. IP classification tasks.
-* **[10_ST-GNN_ChebConv.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/10_ST-GNN_ChebConv.ipynb)**: Implements and trains a Spatio-Temporal Graph Neural Network using Chebyshev convolutions over the spatial electrode graph to decode binocular rivalry states.
-* **[11_ST-EEGFormer.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/11_ST-EEGFormer.ipynb)**: Trains and evaluates a Spatio-Temporal Transformer (ST-EEGFormer) model with spatial and temporal self-attention to classify **Congruent vs. Incongruent Pure** trials.
-* **[11_ST-EEGFormer_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/11_ST-EEGFormer_im_ip.ipynb)**: Trains and evaluates the Spatio-Temporal EEG Transformer on the **Incongruent Mixed vs. Incongruent Pure** classification task. *(Paired with `11_ST-EEGFormer.ipynb`)*.
-* **[12_LaBraM.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/12_LaBraM.ipynb)**: Adapts and fine-tunes a Large Brain Model (LaBraM) pre-trained on massive EEG datasets, utilizing Low-Rank Adaptation (LoRA) to perform transfer learning on the rivalry dataset.
-
----
-
 ### 🎨 Manim Visualizations (`src/scripts/`)
 
 * **[br.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/scripts/br.py)**: A Manim mathematical animation script which generates high-quality schematic video visualizations of the binocular rivalry trial timeline, stimulus representations (Gabor gratings, mirror goggles), congruent/incongruent setups, and pure vs. mixed percept reporting options.
@@ -113,6 +113,18 @@ The source code is organized into a modular helper library ([src/br_analysis](fi
 
 ## 📈 Scientific Findings Summary
 
-1. **Fronto-Medial Theta (5–7 Hz)**: Fronto-medial theta power is significantly higher during the 500–1000 ms time window for incongruent pure (rivalrous) trials than for congruent (non-rivalrous) trials. This occurs despite the elimination of motor reporting confounds, supporting the hypothesis that fronto-medial theta acts as a direct neural index of cognitive/sensory conflict.
-2. **Parieto-Occipital Alpha (8–12 Hz)**: Parieto-occipital alpha power is suppressed (lower power) during incongruent pure trials compared to congruent trials, indicating increased attentional engagement to resolve sensory competition.
-3. **Incongruent Pure vs. Mixed**: Contrary to the initial exploratory prediction, theta power is significantly higher in incongruent pure trials than incongruent mixed trials, indicating that pure percept selection reflects a robust conflict resolution process.
+### 1. Fronto-Medial Theta (5–7 Hz) as a Neural Index of Conflict
+* **Conflict Modulation**: Fronto-medial (fm) theta power is significantly higher during the 500–1000 ms time window for incongruent pure (rivalrous) trials than for congruent (non-rivalrous) trials. This occurs despite the elimination of motor reporting confounds, supporting the hypothesis that fm-theta acts as a direct neural index of cognitive/sensory conflict.
+* **Pure vs. Mixed Dynamics**: Contrary to the initial exploratory prediction, theta power is significantly higher in incongruent pure trials than incongruent mixed trials, indicating that pure percept selection reflects a robust conflict resolution process.
+
+### 2. Parieto-Occipital Alpha (8–12 Hz) and Attentional Suppression
+* **Attentional Engagement**: Parieto-occipital alpha power is suppressed (lower power) during incongruent pure trials compared to congruent trials, indicating increased attentional engagement and active suppression of the rival eye to resolve sensory competition.
+
+### 3. Deep Learning Benchmark Insights (c_vs_ip)
+* **Performance Hierarchy**: Advanced deep learning architectures (ST-GNN, ST-EEGFormer, and LaBraM) fine-tuned via LoRA demonstrate significantly superior performance in decoding binocular rivalry states compared to classical single-channel band-power Logistic Regression models.
+* **Riemannian Geometry vs. Deep Learning**: The Riemannian TS-LDA decoder remains a highly competitive baseline, showcasing robust subject-wise performance and validating the importance of EEG covariance structure.
+* **Wilcoxon Benjamini-Hochberg FDR Matrix**: Centralized pairwise Wilcoxon signed-rank tests demonstrate that ST-EEGFormer and LaBraM achieve statistically significant accuracy boosts over traditional frequency-envelope baseline models, validating the power of self-attention networks in learning complex spatiotemporal dynamics.
+
+### 4. Explainability & Spatial Topographies Convergence
+* **Spatial Saliency & SHAP Consistency**: Across GNN Chebyshev graph convolutions and Multi-Head Self-Attention layers in pre-trained transformers, both backpropagation saliency mappings and SHAP (`shap.GradientExplainer`) feature attributions converge on similar spatial and temporal profiles.
+* **Sensor Importance Map**: Group-level t-tests (masked at $p_{\text{FDR}} < 0.05$) reveal that the models heavily rely on fronto-medial sensor locations (e.g., Fz, FCz, Cz) in the theta band, and parieto-occipital sensor locations (e.g., POz, Oz) in the alpha band during the key conflict resolution window, mirroring the biological findings of Drew et al.
