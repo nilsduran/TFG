@@ -310,7 +310,7 @@ def load_backbone_with_lora(
     Parameters
     ----------
     backbone_factory: Callable[[], nn.Module]
-        A zero-argument callable that returns a fresh backbone instance (e.g. ``mae_vit_base_patch16``).
+        A zero-argument callable that returns a fresh backbone instance (e.g. ``mae_vit_small_patch16``).
     backbone_checkpoint: Path
         Path to the pretrained backbone checkpoint (safetensors or torch).
     lora_path: Path | None

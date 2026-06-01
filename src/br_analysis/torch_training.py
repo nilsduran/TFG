@@ -43,15 +43,30 @@ class TorchTrainConfig:
 
 
 def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.ndarray, np.ndarray]:
-    """Split train/validation chronologically, with validation after training."""
+    """Split train/validation using a stratified split to guarantee class balance
+    and prevent class bias during early stopping, while sorting indices to preserve
+    approximate chronological order.
+    """
+    from sklearn.model_selection import train_test_split
     n_samples = len(y_train)
-    min_val = max(2, int(round(n_samples * val_size)))
-    for val_start in range(n_samples - min_val, 1, -1):
-        tr_idx = np.arange(val_start)
-        val_idx = np.arange(val_start, n_samples)
-        if len(np.unique(y_train[tr_idx])) >= 2 and len(np.unique(y_train[val_idx])) >= 2:
-            return tr_idx, val_idx
-    raise ValueError("No valid temporal train/validation split with both classes in each subset.")
+    indices = np.arange(n_samples)
+    
+    try:
+        tr_idx, val_idx = train_test_split(
+            indices,
+            test_size=val_size,
+            stratify=y_train,
+            random_state=42
+        )
+    except ValueError:
+        # Fallback if stratification is not possible
+        tr_idx, val_idx = train_test_split(
+            indices,
+            test_size=val_size,
+            random_state=42
+        )
+        
+    return np.sort(tr_idx), np.sort(val_idx)
 
 
 def _format_seconds(seconds: float) -> str:
@@ -95,10 +110,24 @@ def build_dataloader(
 
 
 def standardize_train_test(X_train: np.ndarray, X_test: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    mean = X_train.mean(axis=0, keepdims=True)
-    std = X_train.std(axis=0, keepdims=True)
-    std = np.maximum(std, 1e-6)
-    return ((X_train - mean) / std).astype(np.float32), ((X_test - mean) / std).astype(np.float32)
+    def _standardize_individual(X: np.ndarray) -> np.ndarray:
+        if X.ndim == 3:
+            # Raw EEG: (trials, channels, times)
+            # Z-score per trial and per channel over the time axis
+            mean = X.mean(axis=-1, keepdims=True)
+            std = X.std(axis=-1, keepdims=True)
+        elif X.ndim == 4:
+            # Graph features: (trials, windows, nodes, features)
+            # Z-score per trial, node, and feature over the windows (temporal) axis
+            mean = X.mean(axis=1, keepdims=True)
+            std = X.std(axis=1, keepdims=True)
+        else:
+            mean = X.mean(axis=-1, keepdims=True)
+            std = X.std(axis=-1, keepdims=True)
+        std = np.maximum(std, 1e-6)
+        return ((X - mean) / std).astype(np.float32)
+
+    return _standardize_individual(X_train), _standardize_individual(X_test)
 
 
 def _evaluate(
@@ -162,7 +191,16 @@ def fit_one_split(
 
     model = _instantiate_model(make_model, X_train).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    loss_fn = nn.CrossEntropyLoss()
+    
+    # Calculate class weights for training set to handle chronological imbalance
+    class_counts = np.bincount(y_tr, minlength=2)
+    class_counts = np.maximum(class_counts, 1)
+    weights = len(y_tr) / (2.0 * class_counts)
+    class_weights = torch.tensor(weights, dtype=torch.float, device=device)
+    loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+    
+    scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
+    
     best_state = None
     best_val = -np.inf
     wait = 0
@@ -186,29 +224,50 @@ def fit_one_split(
         model.train()
         train_losses: list[float] = []
         batch_iter = train_loader
-        if config.progress and _tqdm is not None:
-            batch_iter = _tqdm(train_loader, desc=f"Train ep {epoch}", leave=False)
         for xb, yb in batch_iter:
             xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad(set_to_none=True)
-            loss = loss_fn(model(xb), yb)
-            if getattr(config, "l1_lambda", 0.0) > 0.0:
-                l1_penalty = 0.0
-                for name, param in model.named_parameters():
-                    if "classifier" in name and "weight" in name:
-                        l1_penalty = l1_penalty + torch.sum(torch.abs(param))
-                loss = loss + config.l1_lambda * l1_penalty
-            loss.backward()
-            optimizer.step()
+            
+            if scaler is not None:
+                with torch.amp.autocast(device_type="cuda"):
+                    loss = loss_fn(model(xb), yb)
+                    if getattr(config, "l1_lambda", 0.0) > 0.0:
+                        l1_penalty = 0.0
+                        for name, param in model.named_parameters():
+                            if "classifier" in name and "weight" in name:
+                                l1_penalty = l1_penalty + torch.sum(torch.abs(param))
+                        loss = loss + config.l1_lambda * l1_penalty
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss = loss_fn(model(xb), yb)
+                if getattr(config, "l1_lambda", 0.0) > 0.0:
+                    l1_penalty = 0.0
+                    for name, param in model.named_parameters():
+                        if "classifier" in name and "weight" in name:
+                            l1_penalty = l1_penalty + torch.sum(torch.abs(param))
+                    loss = loss + config.l1_lambda * l1_penalty
+                loss.backward()
+                optimizer.step()
+                
             train_losses.append(float(loss.item()))
 
         # run evaluation (no progress for val by default)
-        val_loss, val_acc, _, _ = _evaluate(model, val_loader, device)
+        val_loss, val_acc, y_val_true, p_val = _evaluate(model, val_loader, device)
+        pred_val = (p_val >= 0.5).astype(int)
+        val_bal_acc = float(balanced_accuracy_score(y_val_true, pred_val))
         history.append(
-            {"epoch": epoch, "train_loss": float(np.mean(train_losses)), "val_loss": val_loss, "val_acc": val_acc}
+            {
+                "epoch": epoch,
+                "train_loss": float(np.mean(train_losses)),
+                "val_loss": val_loss,
+                "val_acc": val_acc,
+                "val_balanced_acc": val_bal_acc,
+            }
         )
-        if val_acc > best_val:
-            best_val = val_acc
+        if val_bal_acc > best_val:
+            best_val = val_bal_acc
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             wait = 0
         else:
@@ -237,6 +296,9 @@ def fit_one_split(
                     f"epoch={_format_seconds(epoch_seconds)} elapsed={_format_seconds(split_elapsed)} "
                     f"eta_split={_format_seconds(split_eta)}"
                 )
+
+    if pbar is not None:
+        pbar.close()
 
     if best_state is not None:
         model.load_state_dict(best_state)

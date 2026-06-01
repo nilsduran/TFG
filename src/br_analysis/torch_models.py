@@ -34,7 +34,7 @@ class EEGNet(nn.Module):
             nn.BatchNorm2d(F1 * D),
             nn.ELU(),
             nn.AvgPool2d(kernel_size=(1, 4)),
-            nn.Dropout(dropout),
+            nn.Dropout2d(dropout),
         )
         self.block2 = nn.Sequential(
             nn.Conv2d(F1 * D, F1 * D, kernel_size=(1, 16), padding=(0, 8), groups=F1 * D, bias=False),
@@ -42,7 +42,7 @@ class EEGNet(nn.Module):
             nn.BatchNorm2d(F2),
             nn.ELU(),
             nn.AvgPool2d(kernel_size=(1, 8)),
-            nn.Dropout(dropout),
+            nn.Dropout2d(dropout),
         )
         with torch.no_grad():
             dummy = torch.zeros(1, n_channels, n_times)
