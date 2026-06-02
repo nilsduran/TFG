@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*l1_ratios.*")
+
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -8,6 +11,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+
 
 
 class SafeLogisticRegressionCV(LogisticRegressionCV):
