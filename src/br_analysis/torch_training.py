@@ -483,11 +483,22 @@ def cross_validate_torch_model(
         eta_cv = avg_fold * folds_left
         elapsed_cv = time.perf_counter() - cv_start
         print(
-            f"Fold {fold}: acc={metrics['test_acc']:.3f}, bal_acc={metrics['test_balanced_acc']:.3f}, auc={metrics['test_auc']:.3f} "
+            f"Fold {fold}: acc={metrics['test_acc']:.4f}, bal_acc={metrics['test_balanced_acc']:.4f}, auc={metrics['test_auc']:.4f} "
             f"| fold_time={_format_seconds(fold_seconds)} elapsed_cv={_format_seconds(elapsed_cv)} eta_cv={_format_seconds(eta_cv)}"
         )
 
     if all_fold_y_true:
+        df_rows = pd.DataFrame(rows)
+        mean_acc = df_rows["test_acc"].mean()
+        std_acc = df_rows["test_acc"].std() if len(df_rows) > 1 else 0.0
+        fold5_acc = df_rows[df_rows["fold"] == len(df_rows)]["test_acc"].values[0] if len(df_rows) >= 5 else df_rows["test_acc"].values[-1]
+        print("\n" + "="*60)
+        print("SUMMARY METRICS ACROSS FOLDS")
+        print("="*60)
+        print(f"Fold 5 Accuracy: {fold5_acc:.4f}")
+        print(f"Average CV Accuracy: {mean_acc:.4f} ± {std_acc:.4f}")
+        print("="*60 + "\n")
+
         y_true_all = np.concatenate(all_fold_y_true)
         p_test_all = np.concatenate(all_fold_p_test)
         y_pred_all = (p_test_all >= 0.5).astype(int)
