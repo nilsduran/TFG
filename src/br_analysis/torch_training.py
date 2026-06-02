@@ -49,10 +49,10 @@ def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.n
     """
     n_samples = len(y_train)
     indices = np.arange(n_samples)
-    
+
     val_indices = []
     tr_indices = []
-    
+
     # Split chronologically within each class to ensure stratification
     for c in np.unique(y_train):
         c_indices = indices[y_train == c]
@@ -64,34 +64,25 @@ def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.n
         # If possible, have at least 1 val sample per class
         if n_val_c < 1 and n_c >= 2:
             n_val_c = 1
-            
+
         n_train_c = n_c - n_val_c
         tr_indices.extend(c_indices[:n_train_c])
         val_indices.extend(c_indices[n_train_c:])
-        
+
     tr_indices = np.sort(tr_indices)
     val_indices = np.sort(val_indices)
-    
+
     # Fallback to randomized stratified split if validation or train is empty
     if len(tr_indices) == 0 or len(val_indices) == 0:
         from sklearn.model_selection import train_test_split
-        try:
-            tr_indices, val_indices = train_test_split(
-                indices,
-                test_size=val_size,
-                stratify=y_train,
-                random_state=42
-            )
-        except ValueError:
-            tr_indices, val_indices = train_test_split(
-                indices,
-                test_size=val_size,
-                random_state=42
-            )
-        tr_indices, val_indices = np.sort(tr_indices), np.sort(val_indices)
-        
-    return tr_indices, val_indices
 
+        try:
+            tr_indices, val_indices = train_test_split(indices, test_size=val_size, stratify=y_train, random_state=42)
+        except ValueError:
+            tr_indices, val_indices = train_test_split(indices, test_size=val_size, random_state=42)
+        tr_indices, val_indices = np.sort(tr_indices), np.sort(val_indices)
+
+    return tr_indices, val_indices
 
 
 def _format_seconds(seconds: float) -> str:
@@ -183,6 +174,7 @@ def _evaluate(
     pred = (p_arr >= 0.5).astype(int)
     return float(np.mean(losses)), float(accuracy_score(y_arr, pred)), y_arr, p_arr
 
+
 def _instantiate_model(make_model: Callable, X: np.ndarray) -> nn.Module:
     sig = inspect.signature(make_model)
     if len(sig.parameters) > 0:
@@ -216,16 +208,16 @@ def fit_one_split(
 
     model = _instantiate_model(make_model, X_train).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    
+
     # Calculate class weights for training set to handle chronological imbalance
     class_counts = np.bincount(y_tr, minlength=2)
     class_counts = np.maximum(class_counts, 1)
     weights = len(y_tr) / (2.0 * class_counts)
     class_weights = torch.tensor(weights, dtype=torch.float, device=device)
     loss_fn = nn.CrossEntropyLoss(weight=class_weights)
-    
+
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
-    
+
     best_state = None
     best_loss = np.inf
     best_val_bal_acc = 0.0
@@ -253,7 +245,7 @@ def fit_one_split(
         for xb, yb in batch_iter:
             xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad(set_to_none=True)
-            
+
             if scaler is not None:
                 with torch.amp.autocast(device_type="cuda"):
                     loss = loss_fn(model(xb), yb)
@@ -276,7 +268,7 @@ def fit_one_split(
                     loss = loss + config.l1_lambda * l1_penalty
                 loss.backward()
                 optimizer.step()
-                
+
             train_losses.append(float(loss.item()))
 
         # run evaluation (no progress for val by default)
@@ -310,12 +302,14 @@ def fit_one_split(
             split_elapsed = time.perf_counter() - split_start
             split_eta = avg_epoch * epochs_left
             if pbar is not None:
-                pbar.set_postfix({
-                    "loss": f"{history[-1]['train_loss']:.4f}",
-                    "val_acc": f"{val_acc:.4f}",
-                    "elapsed": _format_seconds(split_elapsed),
-                    "eta": _format_seconds(split_eta)
-                })
+                pbar.set_postfix(
+                    {
+                        "loss": f"{history[-1]['train_loss']:.4f}",
+                        "val_acc": f"{val_acc:.4f}",
+                        "elapsed": _format_seconds(split_elapsed),
+                        "eta": _format_seconds(split_eta),
+                    }
+                )
             else:
                 print(
                     f"Epoch {epoch}/{config.epochs} | "
@@ -331,7 +325,7 @@ def fit_one_split(
         model.load_state_dict(best_state)
         if save_path is not None:
             torch.save(best_state, save_path)
-            
+
     test_loss, test_acc, y_true, p_test = _evaluate(model, test_loader, device)
     pred = (p_test >= 0.5).astype(int)
     try:
@@ -410,7 +404,7 @@ def cross_validate_torch_model(
 
     for fold, (train_idx, test_idx) in fold_iter:
         fold_start = time.perf_counter()
-        
+
         fold_weights_path = None
         if save_weights_dir is not None and weights_prefix is not None:
             fold_weights_path = save_weights_dir / f"{weights_prefix}_fold{fold}.pt"
@@ -419,18 +413,18 @@ def cross_validate_torch_model(
             print(f"Fold {fold}: Loading weights from {fold_weights_path}")
             model = _instantiate_model(make_model, X).to(device)
             model.load_state_dict(torch.load(fold_weights_path, map_location=device))
-            
+
             _, X_test = standardize_train_test(X[train_idx], X[test_idx])
             y_test = y[test_idx]
             test_loader = build_dataloader(X_test, y_test, batch_size=config.batch_size, shuffle=False, device=device)
-            
+
             test_loss, test_acc, y_true_arr, p_test = _evaluate(model, test_loader, device)
             pred = (p_test >= 0.5).astype(int)
             try:
                 auc = float(roc_auc_score(y_true_arr, p_test))
             except ValueError:
                 auc = float("nan")
-            
+
             metrics = {
                 "test_loss": test_loss,
                 "test_acc": test_acc,
@@ -443,16 +437,20 @@ def cross_validate_torch_model(
             rows.append(metrics)
             all_fold_y_true.append(y_true_arr)
             all_fold_p_test.append(p_test)
-            
-            history = pd.DataFrame([{
-                "epoch": 1,
-                "train_loss": float("nan"),
-                "val_loss": float("nan"),
-                "val_acc": float("nan"),
-                "fold": fold
-            }])
+
+            history = pd.DataFrame(
+                [
+                    {
+                        "epoch": 1,
+                        "train_loss": float("nan"),
+                        "val_loss": float("nan"),
+                        "val_acc": float("nan"),
+                        "fold": fold,
+                    }
+                ]
+            )
             histories.append(history)
-            
+
             fold_seconds = time.perf_counter() - fold_start
             fold_times.append(fold_seconds)
             del model, test_loader
@@ -491,30 +489,37 @@ def cross_validate_torch_model(
         df_rows = pd.DataFrame(rows)
         mean_acc = df_rows["test_acc"].mean()
         std_acc = df_rows["test_acc"].std() if len(df_rows) > 1 else 0.0
-        fold5_acc = df_rows[df_rows["fold"] == len(df_rows)]["test_acc"].values[0] if len(df_rows) >= 5 else df_rows["test_acc"].values[-1]
-        print("\n" + "="*60)
+        fold5_acc = (
+            df_rows[df_rows["fold"] == len(df_rows)]["test_acc"].values[0]
+            if len(df_rows) >= 5
+            else df_rows["test_acc"].values[-1]
+        )
+        print("\n" + "=" * 60)
         print("SUMMARY METRICS ACROSS FOLDS")
-        print("="*60)
+        print("=" * 60)
         print(f"Fold 5 Accuracy: {fold5_acc:.4f}")
         print(f"Average CV Accuracy: {mean_acc:.4f} ± {std_acc:.4f}")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
 
         y_true_all = np.concatenate(all_fold_y_true)
         p_test_all = np.concatenate(all_fold_p_test)
         y_pred_all = (p_test_all >= 0.5).astype(int)
-        
+
         from sklearn.metrics import classification_report
-        print("\n" + "="*60)
+
+        print("\n" + "=" * 60)
         print("OVERALL CROSS-VALIDATION CLASSIFICATION REPORT (AGGREGATED)")
-        print("="*60)
+        print("=" * 60)
         print(classification_report(y_true_all, y_pred_all))
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
 
     # ── ROC-AUC & PR-AUC plots ──────────────────────────────────────────
     if plot_roc_pr and all_fold_y_true:
         _plot_roc_pr_curves(
-            all_fold_y_true, all_fold_p_test,
-            figures_dir=figures_dir, task_tag=task_tag,
+            all_fold_y_true,
+            all_fold_p_test,
+            figures_dir=figures_dir,
+            task_tag=task_tag,
         )
 
     return pd.DataFrame(rows), pd.concat(histories, ignore_index=True)
@@ -542,8 +547,11 @@ def _plot_roc_pr_curves(
         roc_auc_i = auc(fpr_i, tpr_i)
         roc_aucs.append(roc_auc_i)
         ax_roc.plot(
-            fpr_i, tpr_i,
-            color=cmap(i), alpha=0.3, linewidth=1,
+            fpr_i,
+            tpr_i,
+            color=cmap(i),
+            alpha=0.3,
+            linewidth=1,
             label=f"Fold {i + 1} (AUC = {roc_auc_i:.3f})",
         )
         tpr_interp = np.interp(common_grid, fpr_i, tpr_i)
@@ -557,14 +565,18 @@ def _plot_roc_pr_curves(
     std_auc = float(np.std(roc_aucs))
 
     ax_roc.plot(
-        common_grid, mean_tpr, color="navy", linewidth=2,
+        common_grid,
+        mean_tpr,
+        color="navy",
+        linewidth=2,
         label=f"Mean ROC (AUC = {mean_auc:.3f} ± {std_auc:.3f})",
     )
     ax_roc.fill_between(
         common_grid,
         np.clip(mean_tpr - std_tpr, 0, 1),
         np.clip(mean_tpr + std_tpr, 0, 1),
-        color="navy", alpha=0.15,
+        color="navy",
+        alpha=0.15,
     )
     ax_roc.plot([0, 1], [0, 1], linestyle="--", color="grey", linewidth=1, label="Chance")
     ax_roc.set_xlabel("False Positive Rate")
@@ -593,8 +605,11 @@ def _plot_roc_pr_curves(
         pr_aucs.append(ap_i)
         baselines.append(float(np.mean(all_fold_y_true[i])))
         ax_pr.plot(
-            rec_i, prec_i,
-            color=cmap(i), alpha=0.3, linewidth=1,
+            rec_i,
+            prec_i,
+            color=cmap(i),
+            alpha=0.3,
+            linewidth=1,
             label=f"Fold {i + 1} (μP = {ap_i:.3f})",
         )
         # Reverse so recall is monotonically increasing for interp
@@ -610,14 +625,18 @@ def _plot_roc_pr_curves(
     baseline = float(np.mean(baselines))
 
     ax_pr.plot(
-        common_grid, mean_prec, color="darkgreen", linewidth=2,
+        common_grid,
+        mean_prec,
+        color="darkgreen",
+        linewidth=2,
         label=f"Mean PR (μP = {mean_ap:.3f} ± {std_ap:.3f})",
     )
     ax_pr.fill_between(
         common_grid,
         np.clip(mean_prec - std_prec, 0, 1),
         np.clip(mean_prec + std_prec, 0, 1),
-        color="darkgreen", alpha=0.15,
+        color="darkgreen",
+        alpha=0.15,
     )
     ax_pr.axhline(y=baseline, linestyle="--", color="grey", linewidth=1, label=f"Baseline ({baseline:.2f})")
     ax_pr.set_xlabel("Recall")
@@ -701,20 +720,20 @@ def run_torch_epochs_grid(
 
     rng = np.random.default_rng(random_seed)
     rows = []
-    
+
     n_splits = config.n_splits
-    
+
     for n_total in epochs_grid:
         if n_total % 2 != 0:
             continue
-        
+
         # Test size per fold in chronological CV: approximately n_total / (n_splits + 1)
         test_size_est = max(1, n_total // (n_splits + 1))
-        
+
         # Free analytical chance levels
         chance_mean = 0.5
         chance_q95 = float(stats.binom.ppf(0.95, test_size_est, 0.5) / test_size_est)
-        
+
         real_accs = []
         for rep in range(n_repeats):
             idx_sub = balanced_sample(y, n_total, rng)
@@ -722,7 +741,7 @@ def run_torch_epochs_grid(
                 continue
             X_sub = X[idx_sub]
             y_sub = y[idx_sub]
-            
+
             silent_config = TorchTrainConfig(
                 epochs=config.epochs,
                 batch_size=config.batch_size,
@@ -736,29 +755,29 @@ def run_torch_epochs_grid(
                 progress=False,
                 l1_lambda=config.l1_lambda,
             )
-            cv_metrics, _ = cross_validate_torch_model(
-                X_sub, y_sub, make_model, silent_config
-            )
+            cv_metrics, _ = cross_validate_torch_model(X_sub, y_sub, make_model, silent_config)
             real_accs.append(cv_metrics["test_acc"].mean())
-            
+
         if not real_accs:
             continue
-            
+
         real_mean = float(np.mean(real_accs))
         real_std = float(np.std(real_accs))
-        
-        rows.append({
-            "subject": subject_id or "all",
-            "n_epochs_total": int(n_total),
-            "acc_real_mean": real_mean,
-            "acc_real_std": real_std,
-            "acc_chance_mean": chance_mean,
-            "acc_chance_q95": chance_q95,
-            "delta_acc": real_mean - chance_mean,
-            "delta_acc_q95": real_mean - chance_q95,
-        })
+
+        rows.append(
+            {
+                "subject": subject_id or "all",
+                "n_epochs_total": int(n_total),
+                "acc_real_mean": real_mean,
+                "acc_real_std": real_std,
+                "acc_chance_mean": chance_mean,
+                "acc_chance_q95": chance_q95,
+                "delta_acc": real_mean - chance_mean,
+                "delta_acc_q95": real_mean - chance_q95,
+            }
+        )
         print(f"Grid point {n_total} epochs: acc={real_mean:.3f} ± {real_std:.3f} | chance Q95={chance_q95:.3f}")
-        
+
     return pd.DataFrame(rows)
 
 
@@ -774,7 +793,7 @@ def run_torch_time_map(
 ) -> dict[str, np.ndarray]:
     """Train PyTorch model on sliding time windows to draw accuracy map over time."""
     import scipy.stats as stats
-    
+
     if subject_id is not None:
         if subjects is None:
             raise ValueError("subjects must be provided when subject_id is set.")
@@ -787,7 +806,7 @@ def run_torch_time_map(
     real_map = np.empty(n_windows, dtype=np.float32)
     surr_mean = np.empty(n_windows, dtype=np.float32)
     surr_q95 = np.empty(n_windows, dtype=np.float32)
-    
+
     # Calculate test size for analytical Q95
     n_splits = config.n_splits
     n_total = len(y)
@@ -798,7 +817,7 @@ def run_torch_time_map(
     for wi, (start, stop) in enumerate(zip(windows.starts, windows.stops)):
         print(f"Training Time Window {wi+1}/{n_windows} (center {windows.centers[wi]:.3f}s) ...")
         X_win = X[:, :, start:stop]
-        
+
         silent_config = TorchTrainConfig(
             epochs=config.epochs,
             batch_size=config.batch_size,
@@ -812,19 +831,16 @@ def run_torch_time_map(
             progress=False,
             l1_lambda=config.l1_lambda,
         )
-        cv_metrics, _ = cross_validate_torch_model(
-            X_win, y, make_model, silent_config
-        )
+        cv_metrics, _ = cross_validate_torch_model(X_win, y, make_model, silent_config)
         acc = cv_metrics["test_acc"].mean()
         real_map[wi] = acc
         surr_mean[wi] = chance_mean
         surr_q95[wi] = chance_q95
         print(f"Window {wi+1} Acc: {acc:.3f} | Chance Q95: {chance_q95:.3f}")
-        
+
     return {
         "real_map": real_map,
         "surr_mean": surr_mean,
         "surr_q95": surr_q95,
         "centers": windows.centers,
     }
-
