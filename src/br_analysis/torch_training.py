@@ -43,30 +43,55 @@ class TorchTrainConfig:
 
 
 def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.ndarray, np.ndarray]:
-    """Split train/validation using a stratified split to guarantee class balance
-    and prevent class bias during early stopping, while sorting indices to preserve
-    approximate chronological order.
+    """Split train/validation using a chronological stratified split to guarantee
+    class balance while ensuring that all validation trials are chronologically
+    later than training trials of the same class, avoiding temporal leakage.
     """
-    from sklearn.model_selection import train_test_split
     n_samples = len(y_train)
     indices = np.arange(n_samples)
     
-    try:
-        tr_idx, val_idx = train_test_split(
-            indices,
-            test_size=val_size,
-            stratify=y_train,
-            random_state=42
-        )
-    except ValueError:
-        # Fallback if stratification is not possible
-        tr_idx, val_idx = train_test_split(
-            indices,
-            test_size=val_size,
-            random_state=42
-        )
+    val_indices = []
+    tr_indices = []
+    
+    # Split chronologically within each class to ensure stratification
+    for c in np.unique(y_train):
+        c_indices = indices[y_train == c]
+        n_c = len(c_indices)
+        n_val_c = int(round(n_c * val_size))
+        # Ensure we have at least 1 train sample per class
+        if n_c - n_val_c < 1:
+            n_val_c = n_c - 1
+        # If possible, have at least 1 val sample per class
+        if n_val_c < 1 and n_c >= 2:
+            n_val_c = 1
+            
+        n_train_c = n_c - n_val_c
+        tr_indices.extend(c_indices[:n_train_c])
+        val_indices.extend(c_indices[n_train_c:])
         
-    return np.sort(tr_idx), np.sort(val_idx)
+    tr_indices = np.sort(tr_indices)
+    val_indices = np.sort(val_indices)
+    
+    # Fallback to randomized stratified split if validation or train is empty
+    if len(tr_indices) == 0 or len(val_indices) == 0:
+        from sklearn.model_selection import train_test_split
+        try:
+            tr_indices, val_indices = train_test_split(
+                indices,
+                test_size=val_size,
+                stratify=y_train,
+                random_state=42
+            )
+        except ValueError:
+            tr_indices, val_indices = train_test_split(
+                indices,
+                test_size=val_size,
+                random_state=42
+            )
+        tr_indices, val_indices = np.sort(tr_indices), np.sort(val_indices)
+        
+    return tr_indices, val_indices
+
 
 
 def _format_seconds(seconds: float) -> str:
@@ -202,7 +227,8 @@ def fit_one_split(
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
     
     best_state = None
-    best_val = -np.inf
+    best_loss = np.inf
+    best_val_bal_acc = 0.0
     wait = 0
     history = []
     epoch_durations: list[float] = []
@@ -266,8 +292,9 @@ def fit_one_split(
                 "val_balanced_acc": val_bal_acc,
             }
         )
-        if val_bal_acc > best_val:
-            best_val = val_bal_acc
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_val_bal_acc = val_bal_acc
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             wait = 0
         else:
@@ -316,7 +343,7 @@ def fit_one_split(
         "test_acc": test_acc,
         "test_balanced_acc": float(balanced_accuracy_score(y_true, pred)),
         "test_auc": auc,
-        "best_val_acc": float(best_val),
+        "best_val_acc": float(best_val_bal_acc),
         "epochs_ran": int(len(history)),
     }
     # Release the fold-local model and dataloaders promptly; on Colab CPU this
