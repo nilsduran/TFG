@@ -1,5 +1,9 @@
 """Reusable analysis helpers for the binocular rivalry EEG notebooks."""
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+
+
 from .config import (
     BandChannelSpec,
     BinaryTaskConfig,
