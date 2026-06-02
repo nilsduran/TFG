@@ -219,9 +219,12 @@ class LoRAMultiheadSelfAttention(nn.Module):
         q = self.q_proj(x).reshape(batch, tokens, self.num_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(x).reshape(batch, tokens, self.num_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(x).reshape(batch, tokens, self.num_heads, self.head_dim).transpose(1, 2)
-        attn = (q @ k.transpose(-2, -1)) * (self.head_dim**-0.5)
-        attn = self.dropout(attn.softmax(dim=-1))
-        out = (attn @ v).transpose(1, 2).reshape(batch, tokens, self.embed_dim)
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            dropout_p=self.dropout.p if self.training else 0.0,
+            is_causal=False
+        )
+        out = out.transpose(1, 2).reshape(batch, tokens, self.embed_dim)
         return self.out_proj(out)
 
 

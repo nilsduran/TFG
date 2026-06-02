@@ -259,6 +259,19 @@ def load_backbone_weights(backbone: nn.Module, checkpoint_path: Path, *, strict:
         state = load_safetensors_state_dict(checkpoint_path)
     else:
         state = load_torch_state_dict(checkpoint_path)
+    
+    # Dynamically slice positional/time embeddings if shape doesn't match target model parameters
+    for name, param in backbone.named_parameters():
+        if name in state:
+            state_shape = state[name].shape
+            param_shape = param.shape
+            if state_shape != param_shape:
+                if "time_embed" in name or "pos_embed" in name:
+                    if len(state_shape) == len(param_shape) and state_shape[:-1] != param_shape[:-1]:
+                        print(f"Truncating checkpoint parameter '{name}' from {state_shape} to {param_shape}")
+                        slices = tuple(slice(0, min(s_dim, p_dim)) for s_dim, p_dim in zip(state_shape, param_shape))
+                        state[name] = state[name][slices]
+                        
     backbone.load_state_dict(state, strict=strict)
     return backbone
 

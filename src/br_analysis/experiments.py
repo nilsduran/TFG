@@ -93,31 +93,37 @@ def choose_n_splits(y_s: np.ndarray, max_splits: int = 5) -> int:
 
 def temporal_stratified_splits(y_s: np.ndarray, n_splits: int) -> list[tuple[np.ndarray, np.ndarray]]:
     """Forward-chaining CV splits that keep test epochs later than train epochs.
-
-    If a specific split count yields no valid folds (e.g. because subset blocks have
-    only one class), this function dynamically falls back to lower split counts (down to 2).
-    If that still fails, it searches for a single split point that yields valid binary
-    train and test partitions.
-
-    As an ultimate fallback (e.g. for degenerate randomized permutations where one class
-    completely precedes the other), it returns a randomized stratified 2-fold split.
+    Splits chronologically within each class to guarantee class balance.
     """
     y_s = np.asarray(y_s)
+    classes = np.unique(y_s)
 
     # 1. Try with decreasing number of splits down to 2
     for current_splits in range(n_splits, 1, -1):
-        indices = np.arange(len(y_s))
-        blocks = np.array_split(indices, current_splits + 1)
+        blocks_per_class = []
+        possible = True
+        for c in classes:
+            idx_c = np.where(y_s == c)[0]
+            if len(idx_c) < current_splits + 1:
+                possible = False
+                break
+            blocks_per_class.append(np.array_split(idx_c, current_splits + 1))
+
+        if not possible:
+            continue
+
         splits: list[tuple[np.ndarray, np.ndarray]] = []
-        for fold_idx in range(1, len(blocks)):
-            train_idx = np.concatenate(blocks[:fold_idx])
-            test_idx = blocks[fold_idx]
+        for fold_idx in range(1, current_splits + 1):
+            train_idx = np.concatenate([np.concatenate(b[:fold_idx]) for b in blocks_per_class])
+            test_idx = np.concatenate([b[fold_idx] for b in blocks_per_class])
+            train_idx.sort()
+            test_idx.sort()
             if len(train_idx) == 0 or len(test_idx) == 0:
                 continue
             if len(np.unique(y_s[train_idx])) < 2 or len(np.unique(y_s[test_idx])) < 2:
                 continue
             splits.append((train_idx, test_idx))
-        if splits:
+        if len(splits) == current_splits:
             return splits
 
     # 2. Fallback to a single split point search
@@ -136,6 +142,8 @@ def temporal_stratified_splits(y_s: np.ndarray, n_splits: int) -> list[tuple[np.
 
     train_idx = np.concatenate([idx_0[:mid_0], idx_1[:mid_1]])
     test_idx = np.concatenate([idx_0[mid_0:], idx_1[mid_1:]])
+    train_idx.sort()
+    test_idx.sort()
     return [(train_idx, test_idx), (test_idx, train_idx)]
 
 
