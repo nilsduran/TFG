@@ -584,7 +584,7 @@ def _plot_roc_pr_curves(
         ax_pr.plot(
             rec_i, prec_i,
             color=cmap(i), alpha=0.3, linewidth=1,
-            label=f"Fold {i + 1} (AP = {ap_i:.3f})",
+            label=f"Fold {i + 1} (μP = {ap_i:.3f})",
         )
         # Reverse so recall is monotonically increasing for interp
         rec_rev = rec_i[::-1]
@@ -600,7 +600,7 @@ def _plot_roc_pr_curves(
 
     ax_pr.plot(
         common_grid, mean_prec, color="darkgreen", linewidth=2,
-        label=f"Mean PR (AP = {mean_ap:.3f} ± {std_ap:.3f})",
+        label=f"Mean PR (μP = {mean_ap:.3f} ± {std_ap:.3f})",
     )
     ax_pr.fill_between(
         common_grid,
