@@ -168,6 +168,33 @@ def surrogate_distribution(
     seed: int,
 ) -> np.ndarray:
     rng = np.random.default_rng(seed)
+    
+    # Check if the pipeline contains pyriemann steps that can be pre-computed to speed up permutations
+    clf_temp = model_factory.make()
+    is_riemann_pipeline = False
+    if hasattr(clf_temp, "steps") and len(clf_temp.steps) >= 3:
+        if clf_temp.steps[0][0] == "covariances" or "Covariances" in str(type(clf_temp.steps[0][1])):
+            is_riemann_pipeline = True
+            
+    if is_riemann_pipeline:
+        covs = clf_temp.steps[0][1].fit_transform(X_feat)
+        X_tangent = clf_temp.steps[1][1].fit_transform(covs)
+        
+        from sklearn.base import clone
+        base_clf = clone(clf_temp.steps[2][1])
+        
+        class FastLdaModelFactory:
+            def make(self):
+                return clone(base_clf)
+                
+        fast_factory = FastLdaModelFactory()
+        perm_accs = np.empty(n_perm, dtype=np.float32)
+        for p in range(n_perm):
+            y_perm = rng.permutation(y_s)
+            perm_accs[p] = cv_accuracy(X_tangent, y_perm, n_splits, fast_factory, seed=seed + p + 1)
+        return perm_accs
+
+    # Standard fallback
     perm_accs = np.empty(n_perm, dtype=np.float32)
     for p in range(n_perm):
         y_perm = rng.permutation(y_s)
