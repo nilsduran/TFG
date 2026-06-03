@@ -266,8 +266,8 @@ def load_backbone_weights(backbone: nn.Module, checkpoint_path: Path, *, strict:
             state_shape = state[name].shape
             param_shape = param.shape
             if state_shape != param_shape:
-                if "time_embed" in name or "pos_embed" in name:
-                    if len(state_shape) == len(param_shape) and state_shape[:-1] != param_shape[:-1]:
+                if any(x in name for x in ["time_embed", "pos_embed", "temporal_embedding", "position_embedding", "cls_token"]):
+                    if len(state_shape) == len(param_shape):
                         print(f"Truncating checkpoint parameter '{name}' from {state_shape} to {param_shape}")
                         slices = tuple(slice(0, min(s_dim, p_dim)) for s_dim, p_dim in zip(state_shape, param_shape))
                         state[name] = state[name][slices]

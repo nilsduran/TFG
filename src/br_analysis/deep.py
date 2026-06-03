@@ -27,6 +27,35 @@ def load_raw_epoch_dataset(
     verbose: bool = True,
 ) -> LoadedDataset:
     """Load binary EEG epochs for deep models with shape (trials, channels, times)."""
+    import joblib
+
+    # Construct a cache key/filename based on task and spec to allow fast loading
+    # Normalize/clean model-specific suffix from task name to enable shared caching
+    base_task_name = task.name
+    for base_name in ["c_vs_ip", "im_vs_ip"]:
+        if base_name in task.name:
+            base_task_name = base_name
+            break
+
+    picks_hash = hash(tuple(spec.picks)) if spec.picks else "all"
+    bandpass_str = f"{spec.bandpass[0]}_{spec.bandpass[1]}" if spec.bandpass else "none"
+    sfreq_str = f"{spec.resample_sfreq}" if spec.resample_sfreq else "native"
+    window_str = f"{task.analysis_window[0]}_{task.analysis_window[1]}" if task.analysis_window else "full"
+    cache_name = f"dataset_{base_task_name}_subj{task.max_subjects}_bp{bandpass_str}_sf{sfreq_str}_win{window_str}_pk{picks_hash}.joblib"
+    
+    shared_cache_dir = paths.analysis_root / "cache"
+    shared_cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = shared_cache_dir / cache_name
+
+    if cache_path.exists():
+        if verbose:
+            print(f"Loading preprocessed dataset from cache: {cache_path}")
+        try:
+            return joblib.load(cache_path)
+        except Exception as e:
+            if verbose:
+                print(f"Cache read failed, reloading from source. Error: {e}")
+
     subject_ids = _subject_ids(task.selected_subjects_csv, task.max_subjects)
     fif_by_subject = {p.stem: p for p in paths.data_files}
     x_blocks: list[np.ndarray] = []
@@ -108,6 +137,17 @@ def load_raw_epoch_dataset(
             print("Skipped:")
             for message in skipped:
                 print(f"  {message}")
+
+    # Cache preprocessed dataset to disk
+    try:
+        paths.cache_dir.mkdir(parents=True, exist_ok=True)
+        joblib.dump(dataset, cache_path)
+        if verbose:
+            print(f"Saved preprocessed dataset to cache: {cache_path}")
+    except Exception as e:
+        if verbose:
+            print(f"Failed to cache dataset. Error: {e}")
+
     return dataset
 
 

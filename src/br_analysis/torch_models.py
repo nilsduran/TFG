@@ -182,6 +182,31 @@ class LoRALinear(nn.Module):
         layer.base.load_state_dict(linear.state_dict())
         return layer
 
+    @property
+    def weight(self) -> torch.Tensor:
+        try:
+            if self.r > 0:
+                # Compute effective weight matrix dynamically
+                return self.base.weight + (self.lora_b.weight @ self.lora_a.weight) * self.scaling
+            return self.base.weight
+        except Exception as e:
+            import traceback
+            print("--- DEBUG: Exception in LoRALinear.weight getter ---")
+            traceback.print_exc()
+            print("-----------------------------------------------------")
+            raise e
+
+    @property
+    def bias(self) -> torch.Tensor | None:
+        try:
+            return self.base.bias
+        except Exception as e:
+            import traceback
+            print("--- DEBUG: Exception in LoRALinear.bias getter ---")
+            traceback.print_exc()
+            print("---------------------------------------------------")
+            raise e
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.base(x)
         if self.r > 0:

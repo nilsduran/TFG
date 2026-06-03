@@ -409,11 +409,17 @@ def cross_validate_torch_model(
         if save_weights_dir is not None and weights_prefix is not None:
             fold_weights_path = save_weights_dir / f"{weights_prefix}_fold{fold}.pt"
 
+        loaded_from_cache = False
         if load_weights and fold_weights_path is not None and fold_weights_path.exists():
-            print(f"Fold {fold}: Loading weights from {fold_weights_path}")
-            model = _instantiate_model(make_model, X).to(device)
-            model.load_state_dict(torch.load(fold_weights_path, map_location=device))
+            try:
+                print(f"Fold {fold}: Loading weights from {fold_weights_path}")
+                model = _instantiate_model(make_model, X).to(device)
+                model.load_state_dict(torch.load(fold_weights_path, map_location=device))
+                loaded_from_cache = True
+            except RuntimeError as e:
+                print(f"Warning: Failed to load cached weights for Fold {fold} due to shape/cache mismatch. Ignoring cache and retraining this fold. Details: {e}")
 
+        if loaded_from_cache:
             _, X_test = standardize_train_test(X[train_idx], X[test_idx])
             y_test = y[test_idx]
             test_loader = build_dataloader(X_test, y_test, batch_size=config.batch_size, shuffle=False, device=device)
