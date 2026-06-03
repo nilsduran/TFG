@@ -29,7 +29,7 @@ from .experiments import temporal_stratified_splits, balanced_sample
 
 @dataclass(frozen=True)
 class TorchTrainConfig:
-    epochs: int = 80
+    epochs: int = 100
     batch_size: int = 32
     lr: float = 1e-3
     weight_decay: float = 1e-4
@@ -324,7 +324,16 @@ def fit_one_split(
     if best_state is not None:
         model.load_state_dict(best_state)
         if save_path is not None:
-            torch.save(best_state, save_path)
+            # If the model has frozen parameters, it is a fine-tuned/LoRA model
+            has_frozen = any(not param.requires_grad for param in model.parameters())
+            if has_frozen:
+                # Only save the parameters that require gradients (e.g. LoRA adapters & classifier head)
+                trainable_keys = {name for name, param in model.named_parameters() if param.requires_grad}
+                trainable_state = {k: v for k, v in best_state.items() if k in trainable_keys}
+                torch.save(trainable_state, save_path)
+            else:
+                # Save the entire state dict (parameters + buffers) for fully trained models (e.g. EEGNet)
+                torch.save(best_state, save_path)
 
     test_loss, test_acc, y_true, p_test = _evaluate(model, test_loader, device)
     pred = (p_test >= 0.5).astype(int)
@@ -414,10 +423,13 @@ def cross_validate_torch_model(
             try:
                 print(f"Fold {fold}: Loading weights from {fold_weights_path}")
                 model = _instantiate_model(make_model, X).to(device)
-                model.load_state_dict(torch.load(fold_weights_path, map_location=device))
+                has_frozen = any(not param.requires_grad for param in model.parameters())
+                model.load_state_dict(torch.load(fold_weights_path, map_location=device), strict=not has_frozen)
                 loaded_from_cache = True
             except RuntimeError as e:
-                print(f"Warning: Failed to load cached weights for Fold {fold} due to shape/cache mismatch. Ignoring cache and retraining this fold. Details: {e}")
+                print(
+                    f"Warning: Failed to load cached weights for Fold {fold} due to shape/cache mismatch. Ignoring cache and retraining this fold. Details: {e}"
+                )
 
         if loaded_from_cache:
             _, X_test = standardize_train_test(X[train_idx], X[test_idx])
@@ -516,7 +528,7 @@ def cross_validate_torch_model(
         print("\n" + "=" * 60)
         print("OVERALL CROSS-VALIDATION CLASSIFICATION REPORT (AGGREGATED)")
         print("=" * 60)
-        print(classification_report(y_true_all, y_pred_all))
+        print(classification_report(y_true_all, y_pred_all, zero_division=0.0))
         print("=" * 60 + "\n")
 
     # ── ROC-AUC & PR-AUC plots ──────────────────────────────────────────

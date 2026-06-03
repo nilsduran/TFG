@@ -254,24 +254,41 @@ def prepare_lora_backbone(
     return backbone
 
 
+_BACKBONE_STATE_DICT_CACHE: dict[str, dict[str, torch.Tensor]] = {}
+
+
 def load_backbone_weights(backbone: nn.Module, checkpoint_path: Path, *, strict: bool = False) -> nn.Module:
-    if checkpoint_path.suffix == ".safetensors":
-        state = load_safetensors_state_dict(checkpoint_path)
+    global _BACKBONE_STATE_DICT_CACHE
+    path_str = str(checkpoint_path.resolve())
+    if path_str not in _BACKBONE_STATE_DICT_CACHE:
+        print(f"Loading pretrained model from {checkpoint_path}...")
+        if checkpoint_path.suffix == ".safetensors":
+            state = load_safetensors_state_dict(checkpoint_path)
+        else:
+            state = load_torch_state_dict(checkpoint_path)
+        _BACKBONE_STATE_DICT_CACHE[path_str] = state
     else:
-        state = load_torch_state_dict(checkpoint_path)
-    
+        # Avoid printing repeatedly to keep output clean, but good to know
+        pass
+
+    # Clone tensors to avoid inplace slicing modifying the cached state dict
+    state = {k: v.clone() for k, v in _BACKBONE_STATE_DICT_CACHE[path_str].items()}
+
     # Dynamically slice positional/time embeddings if shape doesn't match target model parameters
     for name, param in backbone.named_parameters():
         if name in state:
             state_shape = state[name].shape
             param_shape = param.shape
             if state_shape != param_shape:
-                if any(x in name for x in ["time_embed", "pos_embed", "temporal_embedding", "position_embedding", "cls_token"]):
+                if any(
+                    x in name
+                    for x in ["time_embed", "pos_embed", "temporal_embedding", "position_embedding", "cls_token"]
+                ):
                     if len(state_shape) == len(param_shape):
                         print(f"Truncating checkpoint parameter '{name}' from {state_shape} to {param_shape}")
                         slices = tuple(slice(0, min(s_dim, p_dim)) for s_dim, p_dim in zip(state_shape, param_shape))
                         state[name] = state[name][slices]
-                        
+
     backbone.load_state_dict(state, strict=strict)
     return backbone
 
