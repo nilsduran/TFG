@@ -241,6 +241,7 @@ def prepare_lora_backbone(
     alpha: float = 16.0,
     dropout: float = 0.05,
     train_classifier: bool = True,
+    train_tokenizer: bool = True,
 ) -> nn.Module:
     inject_lora_into_linears(
         backbone,
@@ -250,7 +251,7 @@ def prepare_lora_backbone(
         alpha=alpha,
         dropout=dropout,
     )
-    freeze_non_lora_parameters(backbone, train_classifier=train_classifier)
+    freeze_non_lora_parameters(backbone, train_classifier=train_classifier, train_tokenizer=train_tokenizer)
     return backbone
 
 

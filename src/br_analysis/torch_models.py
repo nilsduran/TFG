@@ -291,13 +291,19 @@ class LoRATransformerBlock(nn.Module):
         return x
 
 
-def freeze_non_lora_parameters(model: nn.Module, *, train_classifier: bool = True) -> None:
-    """Freeze base weights and leave LoRA adapters plus optional classifier trainable."""
+def freeze_non_lora_parameters(
+    model: nn.Module,
+    *,
+    train_classifier: bool = True,
+    train_tokenizer: bool = True,
+) -> None:
+    """Freeze base weights and leave LoRA adapters plus optional classifier and tokenizer trainable."""
 
     for name, param in model.named_parameters():
         is_lora = "lora_" in name
-        is_head = train_classifier and ("classifier" in name or "head" in name)
-        param.requires_grad = is_lora or is_head
+        is_head = train_classifier and ("classifier" in name or "head" in name or "final" in name)
+        is_tok = train_tokenizer and ("patch_embed" in name or "tokenizer" in name)
+        param.requires_grad = is_lora or is_head or is_tok
 
 
 def inject_lora_into_linears(

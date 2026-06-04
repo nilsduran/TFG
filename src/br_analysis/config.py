@@ -82,19 +82,39 @@ def detect_project_paths(
     colab_drive_root: str | Path = "/content/drive/MyDrive",
     project_folder: str = "TFG_Nils_2026",
 ) -> ProjectPaths:
-    drive_root = Path(colab_drive_root if in_colab else local_drive_root)
-    project_dir = drive_root / project_folder
-    analysis_root = project_dir / "04_Anàlisi"
-    analysis_dir = analysis_root / analysis_name
-    paths = ProjectPaths(
-        project_dir=project_dir,
-        data_dir=project_dir / "02_Data" / "01_Preprocessed_epochs",
-        analysis_root=analysis_root,
-        analysis_dir=analysis_dir,
-        cache_dir=analysis_dir / "cache",
-        tables_dir=analysis_dir / "tables",
-        figures_dir=analysis_dir / "figures",
-    )
+    import os
+    in_kaggle = "KAGGLE_KERNEL_RUN_TYPE" in os.environ
+    
+    if in_kaggle:
+        # On Kaggle, inputs are read from the dataset input directory
+        # Outputs are written to the writable working directory
+        input_project_dir = Path("/kaggle/input/tfg-nils-2026-dataset/TFG_Nils_2026")
+        output_project_dir = Path("/kaggle/working/TFG_Nils_2026")
+        
+        paths = ProjectPaths(
+            project_dir=output_project_dir,
+            data_dir=input_project_dir / "02_Data" / "01_Preprocessed_epochs",
+            analysis_root=input_project_dir / "04_Anàlisi",
+            analysis_dir=output_project_dir / "04_Anàlisi" / analysis_name,
+            cache_dir=output_project_dir / "04_Anàlisi" / analysis_name / "cache",
+            tables_dir=output_project_dir / "04_Anàlisi" / analysis_name / "tables",
+            figures_dir=output_project_dir / "04_Anàlisi" / analysis_name / "figures",
+        )
+    else:
+        drive_root = Path(colab_drive_root if in_colab else local_drive_root)
+        project_dir = drive_root / project_folder
+        analysis_root = project_dir / "04_Anàlisi"
+        analysis_dir = analysis_root / analysis_name
+        paths = ProjectPaths(
+            project_dir=project_dir,
+            data_dir=project_dir / "02_Data" / "01_Preprocessed_epochs",
+            analysis_root=analysis_root,
+            analysis_dir=analysis_dir,
+            cache_dir=analysis_dir / "cache",
+            tables_dir=analysis_dir / "tables",
+            figures_dir=analysis_dir / "figures",
+        )
+        
     paths.ensure()
     return paths
 
