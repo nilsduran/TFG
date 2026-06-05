@@ -40,6 +40,7 @@ class TorchTrainConfig:
     device: str | None = None
     progress: bool = False
     l1_lambda: float = 0.0
+    refit: bool = False
 
 
 def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.ndarray, np.ndarray]:
@@ -226,7 +227,8 @@ def fit_one_split(
 
     best_state = None
     best_loss = np.inf
-    best_val_bal_acc = 0.0
+    best_val_acc = 0.0
+    best_epoch = config.epochs
     wait = 0
     history = []
     epoch_durations: list[float] = []
@@ -280,12 +282,9 @@ def fit_one_split(
         # run evaluation (no progress for val by default)
         if val_loader is not None:
             val_loss, val_acc, y_val_true, p_val = _evaluate(model, val_loader, device)
-            pred_val = (p_val >= 0.5).astype(int)
-            val_bal_acc = float(balanced_accuracy_score(y_val_true, pred_val))
         else:
             val_loss = float("nan")
             val_acc = float("nan")
-            val_bal_acc = float("nan")
 
         history.append(
             {
@@ -293,16 +292,16 @@ def fit_one_split(
                 "train_loss": float(np.mean(train_losses)),
                 "val_loss": val_loss,
                 "val_acc": val_acc,
-                "val_balanced_acc": val_bal_acc,
+                "val_balanced_acc": val_acc,  # Keep key for backward compatibility
             }
         )
 
         if val_loader is not None:
             metric = getattr(config, "early_stopping_metric", "val_loss")
             is_better = False
-            if metric == "val_balanced_acc":
-                if val_bal_acc > best_val_bal_acc:
-                    best_val_bal_acc = val_bal_acc
+            if metric == "val_acc" or metric == "val_balanced_acc":
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
                     is_better = True
             else:
                 if val_loss < best_loss:
@@ -311,6 +310,7 @@ def fit_one_split(
 
             if is_better:
                 best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                best_epoch = epoch
                 wait = 0
             else:
                 wait += 1
@@ -346,6 +346,64 @@ def fit_one_split(
     if pbar is not None:
         pbar.close()
 
+    # ── Refitting Phase ──────────────────────────────────────────────────
+    if getattr(config, "refit", False) and val_loader is not None and best_epoch > 0:
+        print(f"Refitting model on 100% training data (size={len(y_train)}) for exactly {best_epoch} epochs...")
+        # Reset model weights
+        model = None
+        optimizer = None
+        loss_fn = None
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+            
+        model = _instantiate_model(make_model, X_train).to(device)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        
+        # Recalculate weights on the FULL train set
+        class_counts = np.bincount(y_train, minlength=2)
+        class_counts = np.maximum(class_counts, 1)
+        weights = len(y_train) / (2.0 * class_counts)
+        class_weights = torch.tensor(weights, dtype=torch.float, device=device)
+        loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+        
+        # Build dataloader for the FULL training data
+        full_train_loader = build_dataloader(X_train, y_train, batch_size=config.batch_size, shuffle=True, device=device)
+        
+        # Run training loop for exactly best_epoch epochs
+        for epoch in range(1, best_epoch + 1):
+            model.train()
+            for xb, yb in full_train_loader:
+                xb, yb = xb.to(device), yb.to(device)
+                optimizer.zero_grad(set_to_none=True)
+                if scaler is not None:
+                    with torch.amp.autocast(device_type="cuda"):
+                        loss = loss_fn(model(xb), yb)
+                        if getattr(config, "l1_lambda", 0.0) > 0.0:
+                            l1_penalty = 0.0
+                            for name, param in model.named_parameters():
+                                if "classifier" in name and "weight" in name:
+                                    l1_penalty = l1_penalty + torch.sum(torch.abs(param))
+                            loss = loss + config.l1_lambda * l1_penalty
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss = loss_fn(model(xb), yb)
+                    if getattr(config, "l1_lambda", 0.0) > 0.0:
+                        l1_penalty = 0.0
+                        for name, param in model.named_parameters():
+                            if "classifier" in name and "weight" in name:
+                                l1_penalty = l1_penalty + torch.sum(torch.abs(param))
+                        loss = loss + config.l1_lambda * l1_penalty
+                    loss.backward()
+                    optimizer.step()
+        
+        # Save the refitted state as best_state
+        best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        del full_train_loader
+        gc.collect()
+
     if best_state is not None:
         model.load_state_dict(best_state)
         if save_path is not None:
@@ -369,9 +427,9 @@ def fit_one_split(
     metrics = {
         "test_loss": test_loss,
         "test_acc": test_acc,
-        "test_balanced_acc": float(balanced_accuracy_score(y_true, pred)),
+        "test_balanced_acc": test_acc,  # Keep key for backward compatibility
         "test_auc": auc,
-        "best_val_acc": float(best_val_bal_acc),
+        "best_val_acc": float(best_val_acc),
         "epochs_ran": int(len(history)),
     }
     # Release the fold-local model and dataloaders promptly; on Colab CPU this
