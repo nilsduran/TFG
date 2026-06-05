@@ -243,6 +243,19 @@ def prepare_lora_backbone(
     train_classifier: bool = True,
     train_tokenizer: bool = True,
 ) -> nn.Module:
+    # Automatically prune unused decoder parameters to save GPU memory on classification tasks (e.g. ST-EEGFormer)
+    decoder_attrs = [
+        "dec_channel_emd",
+        "dec_temporal_emd",
+        "decoder_embed",
+        "decoder_blocks",
+        "decoder_norm",
+        "decoder_pred",
+    ]
+    for attr in decoder_attrs:
+        if hasattr(backbone, attr):
+            delattr(backbone, attr)
+
     inject_lora_into_linears(
         backbone,
         include_substrings=include_substrings,
@@ -286,7 +299,6 @@ def load_backbone_weights(backbone: nn.Module, checkpoint_path: Path, *, strict:
                     for x in ["time_embed", "pos_embed", "temporal_embedding", "position_embedding", "cls_token"]
                 ):
                     if len(state_shape) == len(param_shape):
-                        print(f"Truncating checkpoint parameter '{name}' from {state_shape} to {param_shape}")
                         slices = tuple(slice(0, min(s_dim, p_dim)) for s_dim, p_dim in zip(state_shape, param_shape))
                         state[name] = state[name][slices]
 

@@ -158,7 +158,7 @@ def load_band_channel_dataset(
             l_freq, h_freq = spec.band_ranges[band]
             ep_band = ep.copy().pick([ch_name])
             ep_band._data = np.ascontiguousarray(ep_band._data)
-            ep_band.filter(l_freq=l_freq, h_freq=h_freq, method="fir", fir_design="firwin", phase="zero-double", verbose=False)
+            ep_band.filter(l_freq=l_freq, h_freq=h_freq, method="iir", verbose=False)
             band_arrays.append(ep_band.get_data()[:, 0, :].astype(np.float32))
 
         if missing_specs or len(band_arrays) != len(spec.target_band_channels):
@@ -235,7 +235,7 @@ def load_fused_band_dataset(
             l_freq, h_freq = spec.band_ranges[band]
             ep_band = ep.copy().pick(avail_chs)
             ep_band._data = np.ascontiguousarray(ep_band._data)
-            ep_band.filter(l_freq=l_freq, h_freq=h_freq, method="fir", phase="zero-double", verbose=False)
+            ep_band.filter(l_freq=l_freq, h_freq=h_freq, method="iir", verbose=False)
             subj_band_data[band] = ep_band.get_data().astype(np.float32)
 
         if not valid_for_subject:

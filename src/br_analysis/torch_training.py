@@ -50,6 +50,9 @@ def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.n
     n_samples = len(y_train)
     indices = np.arange(n_samples)
 
+    if val_size <= 0.0:
+        return indices, np.array([], dtype=int)
+
     val_indices = []
     tr_indices = []
 
@@ -203,7 +206,10 @@ def fit_one_split(
     # Build lazy datasets so each split is batched on demand instead of being
     # copied into a second full tensor upfront.
     train_loader = build_dataloader(X_tr, y_tr, batch_size=config.batch_size, shuffle=True, device=device)
-    val_loader = build_dataloader(X_val, y_val, batch_size=config.batch_size, shuffle=False, device=device)
+    if len(val_idx) > 0:
+        val_loader = build_dataloader(X_val, y_val, batch_size=config.batch_size, shuffle=False, device=device)
+    else:
+        val_loader = None
     test_loader = build_dataloader(X_test, y_test, batch_size=config.batch_size, shuffle=False, device=device)
 
     model = _instantiate_model(make_model, X_train).to(device)
@@ -272,9 +278,15 @@ def fit_one_split(
             train_losses.append(float(loss.item()))
 
         # run evaluation (no progress for val by default)
-        val_loss, val_acc, y_val_true, p_val = _evaluate(model, val_loader, device)
-        pred_val = (p_val >= 0.5).astype(int)
-        val_bal_acc = float(balanced_accuracy_score(y_val_true, pred_val))
+        if val_loader is not None:
+            val_loss, val_acc, y_val_true, p_val = _evaluate(model, val_loader, device)
+            pred_val = (p_val >= 0.5).astype(int)
+            val_bal_acc = float(balanced_accuracy_score(y_val_true, pred_val))
+        else:
+            val_loss = float("nan")
+            val_acc = float("nan")
+            val_bal_acc = float("nan")
+
         history.append(
             {
                 "epoch": epoch,
@@ -284,15 +296,28 @@ def fit_one_split(
                 "val_balanced_acc": val_bal_acc,
             }
         )
-        if val_loss < best_loss:
-            best_loss = val_loss
-            best_val_bal_acc = val_bal_acc
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-            wait = 0
+
+        if val_loader is not None:
+            metric = getattr(config, "early_stopping_metric", "val_loss")
+            is_better = False
+            if metric == "val_balanced_acc":
+                if val_bal_acc > best_val_bal_acc:
+                    best_val_bal_acc = val_bal_acc
+                    is_better = True
+            else:
+                if val_loss < best_loss:
+                    best_loss = val_loss
+                    is_better = True
+
+            if is_better:
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                wait = 0
+            else:
+                wait += 1
+                if wait >= config.patience:
+                    break
         else:
-            wait += 1
-            if wait >= config.patience:
-                break
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
         epoch_seconds = time.perf_counter() - epoch_start
         epoch_durations.append(epoch_seconds)

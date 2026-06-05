@@ -32,10 +32,11 @@ def load_raw_epoch_dataset(
     # Construct a cache key/filename based on task and spec to allow fast loading
     # Normalize/clean model-specific suffix from task name to enable shared caching
     base_task_name = task.name
-    for base_name in ["c_vs_ip", "im_vs_ip"]:
-        if base_name in task.name:
-            base_task_name = base_name
-            break
+    if "c_vs_i" in task.name:
+        base_task_name = "c_vs_ip"
+    elif "im_vs_ip" in task.name:
+        base_task_name = "im_vs_ip"
+
 
     picks_hash = hash(tuple(spec.picks)) if spec.picks else "all"
     bandpass_str = f"{spec.bandpass[0]}_{spec.bandpass[1]}" if spec.bandpass else "none"
@@ -93,7 +94,7 @@ def load_raw_epoch_dataset(
             ep, y_s = _undersample(ep, y_s, seed=_subject_seed(task, subj_name))
         if spec.bandpass is not None:
             ep._data = np.ascontiguousarray(ep._data)
-            ep.filter(l_freq=spec.bandpass[0], h_freq=spec.bandpass[1], method="fir", phase="zero-double", verbose=False)
+            ep.filter(l_freq=spec.bandpass[0], h_freq=spec.bandpass[1], method="iir", verbose=False)
         if spec.resample_sfreq is not None:
             ep.resample(spec.resample_sfreq, verbose=False)
 

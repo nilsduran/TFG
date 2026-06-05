@@ -19,14 +19,18 @@ class ProjectPaths:
 
     def ensure(self) -> None:
         for folder in (
-            self.data_dir,
-            self.analysis_root,
             self.analysis_dir,
             self.cache_dir,
             self.tables_dir,
             self.figures_dir,
         ):
-            folder.mkdir(parents=True, exist_ok=True)
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                # Ignore read-only filesystem errors if the folder already exists
+                if folder.exists():
+                    continue
+                raise e
 
     @property
     def data_files(self) -> list[Path]:
@@ -83,12 +87,15 @@ def detect_project_paths(
     project_folder: str = "TFG_Nils_2026",
 ) -> ProjectPaths:
     import os
-    in_kaggle = "KAGGLE_KERNEL_RUN_TYPE" in os.environ
+    import sys
+    in_kaggle = "KAGGLE_KERNEL_RUN_TYPE" in os.environ or os.path.exists("/kaggle/working")
+    is_colab = in_colab or 'google.colab' in sys.modules or 'COLAB_GPU' in os.environ or os.path.exists('/content/drive')
     
     if in_kaggle:
         # On Kaggle, inputs are read from the dataset input directory
-        # Outputs are written to the writable working directory
-        input_project_dir = Path("/kaggle/input/tfg-nils-2026-dataset/TFG_Nils_2026")
+        # which is located relative to the br_analysis package parent directory
+        dataset_root = Path(__file__).resolve().parent.parent
+        input_project_dir = dataset_root / "TFG_Nils_2026"
         output_project_dir = Path("/kaggle/working/TFG_Nils_2026")
         
         paths = ProjectPaths(
@@ -101,7 +108,7 @@ def detect_project_paths(
             figures_dir=output_project_dir / "04_Anàlisi" / analysis_name / "figures",
         )
     else:
-        drive_root = Path(colab_drive_root if in_colab else local_drive_root)
+        drive_root = Path(colab_drive_root if is_colab else local_drive_root)
         project_dir = drive_root / project_folder
         analysis_root = project_dir / "04_Anàlisi"
         analysis_dir = analysis_root / analysis_name
