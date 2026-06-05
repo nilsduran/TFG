@@ -9,4 +9,8 @@ scikit-learn
 scipy
 pandas
 joblib
-json
+braindecode
+safetensors
+timm
+huggingface_hub
+shap
