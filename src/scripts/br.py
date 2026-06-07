@@ -200,7 +200,9 @@ class BinocularRivalry(MovingCameraScene):
         title.to_edge(UP, buff=0.4)
 
         incongruent = self.stimulus_pair(self.RED_STIM, self.GREEN_STIM, radius=0.48, gap=1.35).move_to(UP * 0.88)
-        incongruent_label = Text(self.text("incongruent_stimulus"), font_size=24, color=GRAY_D).next_to(incongruent, UP, buff=0.25)
+        incongruent_label = Text(self.text("incongruent_stimulus"), font_size=24, color=GRAY_D).next_to(
+            incongruent, UP, buff=0.25
+        )
 
         pure = self.response_disc(self.RED_STIM, radius=0.42)
         or_text = Text(self.text("or"), font_size=30, color=self.DARK)

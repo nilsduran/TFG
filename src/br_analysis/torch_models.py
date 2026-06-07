@@ -375,6 +375,8 @@ class STEEGFormerLoRA(nn.Module):
     ) -> None:
         super().__init__()
         self.n_channels = n_channels
+        self.n_chans = n_channels
+        self.n_times = n_times
         self.patch_size = patch_size
         self.patch_stride = patch_stride
         self.patch_embed = nn.Conv1d(1, embed_dim, kernel_size=patch_size, stride=patch_stride)
@@ -448,6 +450,8 @@ class LaBraMPPLoRA(nn.Module):
     ) -> None:
         super().__init__()
         self.n_channels = n_channels
+        self.n_chans = n_channels
+        self.n_times = n_times
         self.patch_size = patch_size
         self.patch_stride = patch_stride
         self.tokenizer = nn.Sequential(
@@ -486,7 +490,7 @@ class LaBraMPPLoRA(nn.Module):
         if freeze_base:
             freeze_non_lora_parameters(self)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         batch, channels, times = x.shape
         x = x.reshape(batch * channels, 1, times)
         tokens = self.tokenizer(x).transpose(1, 2)
@@ -498,5 +502,7 @@ class LaBraMPPLoRA(nn.Module):
         x = torch.cat([summary, tokens], dim=1)
         for block in self.blocks:
             x = block(x)
-        x = self.norm(x[:, 0])
-        return self.head(x)
+        return self.norm(x[:, 0])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.forward_features(x))
