@@ -17,7 +17,13 @@ from .config import (
     TARGET_BANDS_CLUSTERS,
 )
 from .datasets import LoadedDataset, load_band_channel_dataset, load_fused_band_dataset
-from .experiments import ChanceLevelExperiment, ExperimentSettings, TimeWindowGrid, temporal_stratified_splits
+from .experiments import (
+    ChanceLevelExperiment,
+    ExperimentSettings,
+    TimeWindowGrid,
+    chronological_group_labels,
+    stratified_group_splits,
+)
 from .models import LogRegModelFactory, RiemannLdaModelFactory
 from .deep import RawEpochSpec, electrode_distance_adjacency, load_raw_epoch_dataset, temporal_band_features
 from .torch_models import inject_lora_into_linears
@@ -40,7 +46,8 @@ __all__ = [
     "ChanceLevelExperiment",
     "ExperimentSettings",
     "TimeWindowGrid",
-    "temporal_stratified_splits",
+    "chronological_group_labels",
+    "stratified_group_splits",
     "LogRegModelFactory",
     "RiemannLdaModelFactory",
     "RawEpochSpec",

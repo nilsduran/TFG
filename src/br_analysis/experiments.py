@@ -14,6 +14,7 @@ from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
 from scipy.stats import ttest_rel
+from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 from tqdm.auto import tqdm
 from .features import HilbertMeanEnvelope
 
@@ -91,67 +92,131 @@ def choose_n_splits(y_s: np.ndarray, max_splits: int = 5) -> int:
     return max(2, min(max_splits, int(np.bincount(y_s).min())))
 
 
-def temporal_stratified_splits(y_s: np.ndarray, n_splits: int) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Forward-chaining CV splits that keep test epochs later than train epochs.
-    Splits chronologically within each class to guarantee class balance.
+def chronological_group_labels(n_samples: int, n_groups: int | None = None) -> np.ndarray:
+    """Create ordered trial-block groups for within-subject grouped CV.
+
+    These groups are useful when no natural grouping variable is available
+    after filtering to one subject. They keep nearby trials together while the
+    final holdout remains the untouched latest-trial block.
+    """
+    if n_samples <= 0:
+        return np.array([], dtype=int)
+    if n_groups is None:
+        n_groups = min(10, max(2, n_samples // 10))
+    n_groups = max(2, min(int(n_groups), n_samples))
+    groups = np.empty(n_samples, dtype=int)
+    for group_id, idx in enumerate(np.array_split(np.arange(n_samples), n_groups)):
+        groups[idx] = group_id
+    return groups
+
+
+def _development_mask(
+    n_samples: int,
+    holdout_frac: float,
+    holdout_groups: np.ndarray | None = None,
+) -> np.ndarray:
+    mask = np.ones(n_samples, dtype=bool)
+    if holdout_frac <= 0.0:
+        return mask
+    if holdout_groups is None:
+        cutoff = int(np.floor((1 - holdout_frac) * n_samples))
+        cutoff = max(1, min(cutoff, n_samples - 1))
+        mask[cutoff:] = False
+        return mask
+
+    holdout_groups = np.asarray(holdout_groups)
+    if len(holdout_groups) != n_samples:
+        raise ValueError("holdout_groups must have the same length as y_s.")
+    for group in pd.unique(holdout_groups):
+        idx = np.flatnonzero(holdout_groups == group)
+        if len(idx) < 2:
+            continue
+        cutoff = int(np.floor((1 - holdout_frac) * len(idx)))
+        cutoff = max(1, min(cutoff, len(idx) - 1))
+        mask[idx[cutoff:]] = False
+    return mask
+
+
+def stratified_group_splits(
+    y_s: np.ndarray,
+    groups: np.ndarray | None = None,
+    n_splits: int = 5,
+    holdout_frac: float = 0.2,
+    *,
+    seed: int = 42,
+    holdout_groups: np.ndarray | None = None,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """StratifiedGroupKFold splits on development data only.
+
+    The latest ``holdout_frac`` fraction of samples is excluded from every
+    development fold and can be used later as the single final test set.
+    ``groups`` should normally be subject IDs for cohort-level CV, or ordered
+    trial-block IDs for within-subject CV. Pass ``holdout_groups=subjects`` for
+    cohort arrays so the final 20 % is reserved within each subject rather than
+    from the concatenated tail.
     """
     y_s = np.asarray(y_s)
-    classes = np.unique(y_s)
+    n_samples = len(y_s)
+    if n_samples < 2:
+        return []
 
-    # 1. Try with decreasing number of splits down to 2
-    for current_splits in range(n_splits, 1, -1):
-        blocks_per_class = []
-        possible = True
-        for c in classes:
-            idx_c = np.where(y_s == c)[0]
-            if len(idx_c) < current_splits + 1:
-                possible = False
-                break
-            blocks_per_class.append(np.array_split(idx_c, current_splits + 1))
+    if groups is None:
+        groups = chronological_group_labels(n_samples)
+    groups = np.asarray(groups)
+    if len(groups) != n_samples:
+        raise ValueError("groups must have the same length as y_s.")
 
-        if not possible:
-            continue
+    dev_mask = _development_mask(n_samples, holdout_frac, holdout_groups=holdout_groups)
+    dev_idx = np.flatnonzero(dev_mask)
+    y_dev = y_s[dev_idx]
+    groups_dev = groups[dev_idx]
 
-        splits: list[tuple[np.ndarray, np.ndarray]] = []
-        for fold_idx in range(1, current_splits + 1):
-            train_idx = np.concatenate([np.concatenate(b[:fold_idx]) for b in blocks_per_class])
-            test_idx = np.concatenate([b[fold_idx] for b in blocks_per_class])
-            train_idx.sort()
-            test_idx.sort()
-            if len(train_idx) == 0 or len(test_idx) == 0:
-                continue
-            if len(np.unique(y_s[train_idx])) < 2 or len(np.unique(y_s[test_idx])) < 2:
-                continue
-            splits.append((train_idx, test_idx))
-        if len(splits) == current_splits:
+    if len(np.unique(y_dev)) < 2:
+        return []
+
+    _, class_counts = np.unique(y_dev, return_counts=True)
+    n_group = len(np.unique(groups_dev))
+    effective_splits = min(int(n_splits), int(class_counts.min()), n_group)
+    if effective_splits < 2:
+        return []
+
+    try:
+        splitter = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed)
+        splits = []
+        for tr_dev, te_dev in splitter.split(np.zeros(len(y_dev)), y_dev, groups_dev):
+            tr, te = dev_idx[tr_dev], dev_idx[te_dev]
+            if len(np.unique(y_s[tr])) >= 2 and len(np.unique(y_s[te])) >= 2:
+                splits.append((np.sort(tr), np.sort(te)))
+        if splits:
             return splits
+    except ValueError:
+        pass
 
-    # 2. Fallback to a single split point search
-    n = len(y_s)
-    for split_point in range(n // 4, 3 * n // 4 + 1):
-        train_idx = np.arange(0, split_point)
-        test_idx = np.arange(split_point, n)
-        if len(np.unique(y_s[train_idx])) >= 2 and len(np.unique(y_s[test_idx])) >= 2:
-            return [(train_idx, test_idx)]
-
-    # 3. Ultimate fallback: randomized stratified 2-fold split
-    idx_0 = np.where(y_s == 0)[0]
-    idx_1 = np.where(y_s == 1)[0]
-    mid_0 = len(idx_0) // 2
-    mid_1 = len(idx_1) // 2
-
-    train_idx = np.concatenate([idx_0[:mid_0], idx_1[:mid_1]])
-    test_idx = np.concatenate([idx_0[mid_0:], idx_1[mid_1:]])
-    train_idx.sort()
-    test_idx.sort()
-    return [(train_idx, test_idx), (test_idx, train_idx)]
+    # Fallback for pathological group/class layouts. This still excludes the
+    # final holdout, but cannot guarantee group purity.
+    effective_splits = min(int(n_splits), int(class_counts.min()), len(y_dev))
+    if effective_splits < 2:
+        return []
+    splitter = StratifiedKFold(n_splits=effective_splits, shuffle=True, random_state=seed)
+    return [(np.sort(dev_idx[tr]), np.sort(dev_idx[te])) for tr, te in splitter.split(np.zeros(len(y_dev)), y_dev)]
 
 
-def cv_accuracy(X_feat: np.ndarray, y_s: np.ndarray, n_splits: int, model_factory: Any, *, seed: int) -> float:
+def cv_accuracy(
+    X_feat: np.ndarray,
+    y_s: np.ndarray,
+    n_splits: int,
+    model_factory: Any,
+    *,
+    seed: int,
+    groups: np.ndarray | None = None,
+    holdout_groups: np.ndarray | None = None,
+) -> float:
     if X_feat.ndim == 1:
         X_feat = X_feat[:, None]
     accs = []
-    for tr, te in temporal_stratified_splits(y_s, n_splits):
+    for tr, te in stratified_group_splits(
+        y_s, groups=groups, n_splits=n_splits, seed=seed, holdout_groups=holdout_groups
+    ):
         clf = model_factory.make()
         clf.fit(X_feat[tr], y_s[tr])
         accs.append(float(np.mean(clf.predict(X_feat[te]) == y_s[te])))
@@ -166,39 +231,26 @@ def surrogate_distribution(
     model_factory: Any,
     *,
     seed: int,
+    groups: np.ndarray | None = None,
+    holdout_groups: np.ndarray | None = None,
 ) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    
-    # Check if the pipeline contains pyriemann steps that can be pre-computed to speed up permutations
-    clf_temp = model_factory.make()
-    is_riemann_pipeline = False
-    if hasattr(clf_temp, "steps") and len(clf_temp.steps) >= 3:
-        if clf_temp.steps[0][0] == "covariances" or "Covariances" in str(type(clf_temp.steps[0][1])):
-            is_riemann_pipeline = True
-            
-    if is_riemann_pipeline:
-        covs = clf_temp.steps[0][1].fit_transform(X_feat)
-        X_tangent = clf_temp.steps[1][1].fit_transform(covs)
-        
-        from sklearn.base import clone
-        base_clf = clone(clf_temp.steps[2][1])
-        
-        class FastLdaModelFactory:
-            def make(self):
-                return clone(base_clf)
-                
-        fast_factory = FastLdaModelFactory()
-        perm_accs = np.empty(n_perm, dtype=np.float32)
-        for p in range(n_perm):
-            y_perm = rng.permutation(y_s)
-            perm_accs[p] = cv_accuracy(X_tangent, y_perm, n_splits, fast_factory, seed=seed + p + 1)
-        return perm_accs
 
-    # Standard fallback
+    # Keep every preprocessing step inside each CV fold. Precomputing
+    # Riemannian tangent features before splitting leaks validation/holdout
+    # information into the reference point.
     perm_accs = np.empty(n_perm, dtype=np.float32)
     for p in range(n_perm):
         y_perm = rng.permutation(y_s)
-        perm_accs[p] = cv_accuracy(X_feat, y_perm, n_splits, model_factory, seed=seed + p + 1)
+        perm_accs[p] = cv_accuracy(
+            X_feat,
+            y_perm,
+            n_splits,
+            model_factory,
+            seed=seed + p + 1,
+            groups=groups,
+            holdout_groups=holdout_groups,
+        )
     return perm_accs
 
 

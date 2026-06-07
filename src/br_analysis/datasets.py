@@ -65,6 +65,7 @@ def _read_eeg_epochs(fif_path: Path, *, preload: bool = True) -> mne.Epochs:
                     os.unlink(p)
             except Exception:
                 pass
+
         weakref.finalize(ep, _cleanup, str(temp_fif_path))
 
     for ch_idx, _ in enumerate(ep.ch_names):
@@ -280,7 +281,31 @@ def _print_dataset_summary(dataset: LoadedDataset, task: BinaryTaskConfig, *, ve
     )
     print(f"Loaded subjects: {len(np.unique(dataset.subjects))}")
     print(f"Channels: {dataset.channel_names}")
-    if dataset.skipped:
-        print("Skipped:")
-        for message in dataset.skipped:
-            print(f"  {message}")
+
+
+def chronological_holdout(
+    X: np.ndarray, y: np.ndarray, holdout_frac: float = 0.20
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Split subject data chronologically.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Shape (n_trials, n_channels, n_times) or (n_trials, n_features).
+    y : np.ndarray
+        Shape (n_trials,).
+    holdout_frac : float, optional
+        Fraction of the *latest* trials to keep as a strict test set.
+        Default is 0.20 (20 %).
+
+    Returns
+    -------
+    X_dev, X_test, y_dev, y_test : tuple of np.ndarray
+        Development (first 80 %) and test (last 20 %) splits.
+    """
+    n_trials = X.shape[0]
+    split_idx = int(np.floor((1 - holdout_frac) * n_trials))
+    split_idx = max(1, min(split_idx, n_trials - 1))
+    X_dev, X_test = X[:split_idx], X[split_idx:]
+    y_dev, y_test = y[:split_idx], y[split_idx:]
+    return X_dev, X_test, y_dev, y_test

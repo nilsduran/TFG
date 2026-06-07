@@ -24,7 +24,11 @@ from sklearn.metrics import (
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from .experiments import temporal_stratified_splits, balanced_sample
+from .experiments import (
+    chronological_group_labels,
+    stratified_group_splits,
+    balanced_sample,
+)
 
 
 @dataclass(frozen=True)
@@ -116,8 +120,10 @@ def build_dataloader(
     *,
     batch_size: int,
     shuffle: bool,
-    device: torch.device,
+    device: torch.device | str,
 ) -> DataLoader:
+    if isinstance(device, str):
+        device = torch.device(device)
     dataset = NumpyClassificationDataset(X, y)
     return DataLoader(
         dataset,
@@ -127,6 +133,7 @@ def build_dataloader(
         pin_memory=device.type == "cuda",
         persistent_workers=False,
     )
+
 
 
 def standardize_train_test(X_train: np.ndarray, X_test: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -464,6 +471,7 @@ def cross_validate_torch_model(
             raise ValueError(f"Subject not found: {subject_id}")
         X = X[mask]
         y = y[mask]
+        subjects = None
         print(f"Filtering to subject {subject_id}: {len(y)} epochs")
 
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -489,7 +497,15 @@ def cross_validate_torch_model(
     except Exception:
         _tqdm = None
 
-    splits = temporal_stratified_splits(y, config.n_splits)
+    cv_groups = np.asarray(subjects) if subjects is not None else chronological_group_labels(len(y))
+    holdout_groups = np.asarray(subjects) if subjects is not None else None
+    splits = stratified_group_splits(
+        y,
+        groups=cv_groups,
+        n_splits=config.n_splits,
+        seed=config.random_seed,
+        holdout_groups=holdout_groups,
+    )
     fold_iter = enumerate(splits, start=1)
     if config.progress and _tqdm is not None:
         fold_iter = _tqdm(list(fold_iter), desc="Folds")
@@ -828,8 +844,8 @@ def run_torch_epochs_grid(
         if n_total % 2 != 0:
             continue
 
-        # Test size per fold in chronological CV: approximately n_total / (n_splits + 1)
-        test_size_est = max(1, n_total // (n_splits + 1))
+        # Approximate validation size after reserving the final 20% holdout.
+        test_size_est = max(1, int(0.8 * n_total) // n_splits)
 
         # Free analytical chance levels
         chance_mean = 0.5
@@ -911,7 +927,7 @@ def run_torch_time_map(
     # Calculate test size for analytical Q95
     n_splits = config.n_splits
     n_total = len(y)
-    test_size_est = max(1, n_total // (n_splits + 1))
+    test_size_est = max(1, int(0.8 * n_total) // n_splits)
     chance_mean = 0.5
     chance_q95 = float(stats.binom.ppf(0.95, test_size_est, 0.5) / test_size_est)
 
