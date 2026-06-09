@@ -1,5 +1,6 @@
 numpy
 mne
+pyriemann
 matplotlib
 seaborn
 torch
@@ -14,3 +15,4 @@ safetensors
 timm
 huggingface_hub
 shap
+optuna

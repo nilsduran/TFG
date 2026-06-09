@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -17,6 +17,8 @@ class RawEpochSpec:
     picks: Sequence[str] | None = None
     bandpass: tuple[float, float] | None = None
     resample_sfreq: float | None = None
+    analysis_window: tuple[float, float] | None = None
+    peak_align_all_channels: bool = False
 
 
 def load_raw_epoch_dataset(
@@ -41,7 +43,9 @@ def load_raw_epoch_dataset(
     picks_hash = hash(tuple(spec.picks)) if spec.picks else "all"
     bandpass_str = f"{spec.bandpass[0]}_{spec.bandpass[1]}" if spec.bandpass else "none"
     sfreq_str = f"{spec.resample_sfreq}" if spec.resample_sfreq else "native"
-    window_str = f"{task.analysis_window[0]}_{task.analysis_window[1]}" if task.analysis_window else "full"
+    analysis_window = spec.analysis_window if spec.analysis_window is not None else task.analysis_window
+    task_for_selection = replace(task, analysis_window=analysis_window)
+    window_str = f"{analysis_window[0]}_{analysis_window[1]}" if analysis_window else "full"
     cache_name = f"dataset_{base_task_name}_subj{task.max_subjects}_bp{bandpass_str}_sf{sfreq_str}_win{window_str}_pk{picks_hash}.joblib"
     
     shared_cache_dir = paths.analysis_root / "cache"
@@ -86,7 +90,7 @@ def load_raw_epoch_dataset(
                 continue
             ep = ep.copy().pick(available)
 
-        ep, y_s, reason = _select_binary_epochs(ep, task)
+        ep, y_s, reason = _select_binary_epochs(ep, task_for_selection)
         if ep is None or y_s is None:
             skipped.append(f"{fif_path.name}: {reason}")
             continue

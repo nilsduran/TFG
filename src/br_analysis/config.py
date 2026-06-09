@@ -92,10 +92,25 @@ def detect_project_paths(
     is_colab = in_colab or 'google.colab' in sys.modules or 'COLAB_GPU' in os.environ or os.path.exists('/content/drive')
     
     if in_kaggle:
-        # On Kaggle, inputs are read from the dataset input directory
-        # which is located relative to the br_analysis package parent directory
-        dataset_root = Path(__file__).resolve().parent.parent
-        input_project_dir = dataset_root / "TFG_Nils_2026"
+        # On Kaggle, code and data may be mounted from separate datasets. Prefer
+        # an explicitly uploaded/extracted project folder, then fall back to the
+        # package parent for bundles that include TFG_Nils_2026 next to br_analysis.
+        search_roots = [Path("/kaggle/input"), Path("/kaggle/working"), Path(__file__).resolve().parent.parent]
+        input_project_dir = None
+        for root in search_roots:
+            if not root.exists():
+                continue
+            candidates = [root / project_folder]
+            candidates.extend(path for path in root.glob("**/" + project_folder) if path.is_dir())
+            candidates.extend(path for path in root.glob("**") if path.is_dir() and (path / "02_Data").exists())
+            for candidate in candidates:
+                if candidate.exists() and ((candidate / "02_Data").exists() or (candidate / "04_Anàlisi").exists()):
+                    input_project_dir = candidate
+                    break
+            if input_project_dir is not None:
+                break
+        if input_project_dir is None:
+            input_project_dir = Path(__file__).resolve().parent.parent / project_folder
         output_project_dir = Path("/kaggle/working/TFG_Nils_2026")
         
         paths = ProjectPaths(
