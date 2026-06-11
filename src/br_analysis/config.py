@@ -82,15 +82,18 @@ def detect_project_paths(
     analysis_name: str,
     *,
     in_colab: bool = False,
+    in_kaggle: bool = False,
     local_drive_root: str | Path = r"H:\.shortcut-targets-by-id\19KyEKxqClpX2n1-oU8TXRrmUspaPJKNU",
     colab_drive_root: str | Path = "/content/drive/MyDrive",
     project_folder: str = "TFG_Nils_2026",
 ) -> ProjectPaths:
     import os
     import sys
-    in_kaggle = "KAGGLE_KERNEL_RUN_TYPE" in os.environ or os.path.exists("/kaggle/working")
-    is_colab = in_colab or 'google.colab' in sys.modules or 'COLAB_GPU' in os.environ or os.path.exists('/content/drive')
-    
+
+    is_colab = (
+        in_colab or "google.colab" in sys.modules or "COLAB_GPU" in os.environ or os.path.exists("/content/drive")
+    )
+
     if in_kaggle:
         # On Kaggle, code and data may be mounted from separate datasets. Prefer
         # an explicitly uploaded/extracted project folder, then fall back to the
@@ -112,7 +115,7 @@ def detect_project_paths(
         if input_project_dir is None:
             input_project_dir = Path(__file__).resolve().parent.parent / project_folder
         output_project_dir = Path("/kaggle/working/TFG_Nils_2026")
-        
+
         paths = ProjectPaths(
             project_dir=output_project_dir,
             data_dir=input_project_dir / "02_Data" / "01_Preprocessed_epochs",
@@ -136,7 +139,7 @@ def detect_project_paths(
             tables_dir=analysis_dir / "tables",
             figures_dir=analysis_dir / "figures",
         )
-        
+
     paths.ensure()
     return paths
 
@@ -182,6 +185,20 @@ def get_task_config(
             undersample_classes=True,
             analysis_window=analysis_window or (0.0, 1.5),
         )
+    elif task_name == "ipr_vs_ipg":
+        return BinaryTaskConfig(
+            name=name or "ipr_vs_ipg",
+            class_0="Incongruent_Pure_Red",
+            class_1="Incongruent_Pure_Green",
+            event_codes={
+                "Incongruent_Pure_Red": [3, 4],
+                "Incongruent_Pure_Green": [5, 6],
+            },
+            selected_subjects_csv=analysis_root / "exploration" / "tables" / "subjectes_seleccionats_im_vs_ip.csv",
+            max_subjects=29,
+            undersample_classes=True,
+            analysis_window=analysis_window or (0.0, 1.5),
+        )
     else:
         raise ValueError(f"Unknown task name: {task_name}")
 
@@ -191,6 +208,8 @@ def get_epochs_grid(task_name: str) -> list[int]:
     if task_name == "c_vs_ip":
         return [20, 40, 70, 100, 150, 200, 300, 380]
     elif task_name == "im_vs_ip":
+        return [20, 40, 60, 100, 150, 200, 240, 270]
+    elif task_name == "ipr_vs_ipg":
         return [20, 40, 60, 100, 150, 200, 240, 270]
     else:
         raise ValueError(f"Unknown task name: {task_name}")

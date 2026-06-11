@@ -45,6 +45,7 @@ class TorchTrainConfig:
     progress: bool = False
     l1_lambda: float = 0.0
     refit: bool = False
+    early_stopping_metric: str = "val_loss"
 
 
 def temporal_train_val_split(y_train: np.ndarray, val_size: float) -> tuple[np.ndarray, np.ndarray]:
@@ -159,7 +160,7 @@ def standardize_train_test(X_train: np.ndarray, X_test: np.ndarray) -> tuple[np.
 
 def _evaluate(
     model: nn.Module, loader: DataLoader, device: torch.device
-) -> tuple[float, float, np.ndarray, np.ndarray]:
+) -> tuple[float, float, float, np.ndarray, np.ndarray]:
     model.eval()
     loss_fn = nn.CrossEntropyLoss()
     losses: list[float] = []
@@ -183,7 +184,13 @@ def _evaluate(
     y_arr = np.concatenate(y_true)
     p_arr = np.concatenate(probs)
     pred = (p_arr >= 0.5).astype(int)
-    return float(np.mean(losses)), float(accuracy_score(y_arr, pred)), y_arr, p_arr
+    return (
+        float(np.mean(losses)),
+        float(accuracy_score(y_arr, pred)),
+        float(balanced_accuracy_score(y_arr, pred)),
+        y_arr,
+        p_arr,
+    )
 
 
 def _instantiate_model(make_model: Callable, X: np.ndarray) -> nn.Module:
@@ -288,10 +295,11 @@ def fit_one_split(
 
         # run evaluation (no progress for val by default)
         if val_loader is not None:
-            val_loss, val_acc, y_val_true, p_val = _evaluate(model, val_loader, device)
+            val_loss, val_acc, val_balanced_acc, y_val_true, p_val = _evaluate(model, val_loader, device)
         else:
             val_loss = float("nan")
             val_acc = float("nan")
+            val_balanced_acc = float("nan")
 
         history.append(
             {
@@ -299,16 +307,22 @@ def fit_one_split(
                 "train_loss": float(np.mean(train_losses)),
                 "val_loss": val_loss,
                 "val_acc": val_acc,
-                "val_balanced_acc": val_acc,  # Keep key for backward compatibility
+                "val_balanced_acc": val_balanced_acc,
             }
         )
 
         if val_loader is not None:
-            metric = getattr(config, "early_stopping_metric", "val_loss")
+            metric = config.early_stopping_metric
             is_better = False
-            if metric == "val_acc" or metric == "val_balanced_acc":
-                if val_acc > best_val_acc:
-                    best_val_acc = val_acc
+            if metric == "val_acc":
+                metric_value = val_acc
+                if metric_value > best_val_acc:
+                    best_val_acc = metric_value
+                    is_better = True
+            elif metric == "val_balanced_acc":
+                metric_value = val_balanced_acc
+                if metric_value > best_val_acc:
+                    best_val_acc = metric_value
                     is_better = True
             else:
                 if val_loss < best_loss:
@@ -425,7 +439,7 @@ def fit_one_split(
                 # Save the entire state dict (parameters + buffers) for fully trained models (e.g. EEGNet)
                 torch.save(best_state, save_path)
 
-    test_loss, test_acc, y_true, p_test = _evaluate(model, test_loader, device)
+    test_loss, test_acc, test_balanced_acc, y_true, p_test = _evaluate(model, test_loader, device)
     pred = (p_test >= 0.5).astype(int)
     try:
         auc = float(roc_auc_score(y_true, p_test))
@@ -434,7 +448,7 @@ def fit_one_split(
     metrics = {
         "test_loss": test_loss,
         "test_acc": test_acc,
-        "test_balanced_acc": test_acc,  # Keep key for backward compatibility
+        "test_balanced_acc": test_balanced_acc,
         "test_auc": auc,
         "best_val_acc": float(best_val_acc),
         "epochs_ran": int(len(history)),
@@ -535,7 +549,7 @@ def cross_validate_torch_model(
             y_test = y[test_idx]
             test_loader = build_dataloader(X_test, y_test, batch_size=config.batch_size, shuffle=False, device=device)
 
-            test_loss, test_acc, y_true_arr, p_test = _evaluate(model, test_loader, device)
+            test_loss, test_acc, test_balanced_acc, y_true_arr, p_test = _evaluate(model, test_loader, device)
             pred = (p_test >= 0.5).astype(int)
             try:
                 auc = float(roc_auc_score(y_true_arr, p_test))
@@ -545,7 +559,7 @@ def cross_validate_torch_model(
             metrics = {
                 "test_loss": test_loss,
                 "test_acc": test_acc,
-                "test_balanced_acc": balanced_accuracy_score(y_true_arr, pred),
+                "test_balanced_acc": test_balanced_acc,
                 "test_auc": auc,
                 "best_val_acc": float("nan"),
                 "epochs_ran": 0,
@@ -562,6 +576,7 @@ def cross_validate_torch_model(
                         "train_loss": float("nan"),
                         "val_loss": float("nan"),
                         "val_acc": float("nan"),
+                        "val_balanced_acc": float("nan"),
                         "fold": fold,
                     }
                 ]
