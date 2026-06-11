@@ -728,9 +728,9 @@ For **IM vs IP**, stored outputs show:
 
 This is one of the clearest methodological results: covariance structure across theta and alpha networks is more informative than isolated single-channel features, especially for C vs IP.
 
-### 05_best_config_c_ip.ipynb and 09_best_config_im_ip.ipynb
+### 05_experiment_guided_config_c_ip.ipynb and 09_experiment_guided_config_im_ip.ipynb
 
-These notebooks apply the locked best configurations selected by Experiment 8. They do not compare alternatives. They report development CV separately from the reserved final holdout test.
+These notebooks apply the experiment-guided configurations selected by Experiment 8. They do not compare alternatives. They report development CV separately from the reserved final holdout test.
 
 The best-configuration logic is important because it separates **model search** from **final evaluation**. In Experiment 8, many choices are explored jointly:
 
@@ -766,7 +766,7 @@ IM vs IP:
 
 The same notebook includes a controlled ablation analysis. For C vs IP, replacing the selected band and spatial setting causes the largest drops, suggesting that spectral and spatial choices are not arbitrary. For IM vs IP, replacing the spatial setting, band, model family, and time scope all produces meaningful drops in the cached ablation, suggesting that the best IM vs IP configuration is more dependent on the full combination of preprocessing choices.
 
-This should be written carefully in the thesis: Experiment 8 is a configuration-search result, not a final independent proof. Its value is to guide the locked best-configuration notebooks and to show which preprocessing/model components appear important.
+This should be written carefully in the thesis: Experiment 8 is a configuration-search result, not a final independent proof. Its value is to guide the pre-specified experiment-guided configuration notebooks and to show which preprocessing/model components appear important.
 
 ### 06_visualitzacions.ipynb
 
