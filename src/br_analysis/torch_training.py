@@ -193,6 +193,92 @@ def _evaluate(
     )
 
 
+def input_attribution_summary(
+    model: nn.Module,
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    device: torch.device | str,
+    batch_size: int = 16,
+    mode: str = "input_gradient",
+    ig_steps: int = 8,
+    only_correct: bool = True,
+    temporal_axis: int = -1,
+    spatial_axis: int = 1,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Compute compact input-attribution summaries for one held-out fold.
+
+    The function streams mini-batches and returns only mean spatial and temporal
+    summaries. This keeps attribution export cheap enough to run next to OOF
+    prediction export without retaining trial-level saliency tensors.
+    """
+
+    device = torch.device(device)
+    model = model.to(device)
+    model.eval()
+    X = np.asarray(X, dtype=np.float32)
+    y = np.asarray(y, dtype=np.int64)
+    if X.shape[0] == 0:
+        raise ValueError("X must contain at least one sample.")
+
+    def _batch_attr(xb: torch.Tensor, yb: torch.Tensor) -> torch.Tensor:
+        if mode == "integrated_gradients":
+            baseline = torch.zeros_like(xb)
+            total_grad = torch.zeros_like(xb)
+            steps = max(1, int(ig_steps))
+            for alpha in torch.linspace(1.0 / steps, 1.0, steps, device=device):
+                xi = (baseline + alpha * (xb - baseline)).detach().requires_grad_(True)
+                logits = model(xi)
+                scores = logits[torch.arange(len(yb), device=device), yb]
+                model.zero_grad(set_to_none=True)
+                scores.sum().backward()
+                total_grad = total_grad + xi.grad.detach()
+            return torch.abs((xb - baseline) * (total_grad / steps))
+
+        xi = xb.detach().requires_grad_(True)
+        logits = model(xi)
+        scores = logits[torch.arange(len(yb), device=device), yb]
+        model.zero_grad(set_to_none=True)
+        scores.sum().backward()
+        grad = xi.grad.detach()
+        return torch.abs(grad * xi.detach()) if mode == "input_gradient" else torch.abs(grad)
+
+    with torch.no_grad():
+        probs = []
+        for start in range(0, len(X), batch_size):
+            xb = torch.as_tensor(X[start : start + batch_size], dtype=torch.float32, device=device)
+            probs.append(torch.softmax(model(xb), dim=1)[:, 1].detach().cpu().numpy())
+    probs_arr = np.concatenate(probs)
+    pred = (probs_arr >= 0.5).astype(np.int64)
+    keep = pred == y if only_correct else np.ones_like(y, dtype=bool)
+    if not keep.any():
+        keep = np.ones_like(y, dtype=bool)
+
+    X_keep = X[keep]
+    y_keep = y[keep]
+    spatial_sum: np.ndarray | None = None
+    temporal_sum: np.ndarray | None = None
+    n_used = 0
+    for start in range(0, len(X_keep), batch_size):
+        xb = torch.as_tensor(X_keep[start : start + batch_size], dtype=torch.float32, device=device)
+        yb = torch.as_tensor(y_keep[start : start + batch_size], dtype=torch.long, device=device)
+        attr = _batch_attr(xb, yb).detach().cpu().numpy()
+        s_axis = spatial_axis % attr.ndim
+        t_axis = temporal_axis % attr.ndim
+        spatial = attr.mean(axis=tuple(i for i in range(attr.ndim) if i not in {0, s_axis}))
+        temporal = attr.mean(axis=tuple(i for i in range(attr.ndim) if i not in {0, t_axis}))
+        if spatial_sum is None:
+            spatial_sum = np.zeros(spatial.shape[1:], dtype=np.float64)
+            temporal_sum = np.zeros(temporal.shape[1:], dtype=np.float64)
+        spatial_sum += spatial.sum(axis=0)
+        temporal_sum += temporal.sum(axis=0)
+        n_used += attr.shape[0]
+
+    if n_used == 0 or spatial_sum is None or temporal_sum is None:
+        raise RuntimeError("No samples were available for attribution.")
+    return (spatial_sum / n_used).astype(np.float32), (temporal_sum / n_used).astype(np.float32), int(n_used)
+
+
 def _instantiate_model(make_model: Callable, X: np.ndarray) -> nn.Module:
     sig = inspect.signature(make_model)
     if len(sig.parameters) > 0:
@@ -629,7 +715,6 @@ def cross_validate_torch_model(
         print("\n" + "=" * 60)
         print("SUMMARY METRICS ACROSS FOLDS")
         print("=" * 60)
-        print(f"Fold 5 Accuracy: {fold5_acc:.4f}")
         print(f"Average CV Accuracy: {mean_acc:.4f} ± {std_acc:.4f}")
         print("=" * 60 + "\n")
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ MODEL_ORDER = [
     "Experiment_Guided",
     "EEGNet_Agnostic",
     "EEGNet_Clustering",
+    "SVC_Clustering",
     "ST_GNN",
     "ST_EEGFormer",
     "LaBraM",
@@ -29,6 +30,7 @@ MODEL_LABELS = {
     "Experiment_Guided": "Experiment-guided",
     "EEGNet_Agnostic": "EEGNet agnostic",
     "EEGNet_Clustering": "EEGNet clustering",
+    "SVC_Clustering": "SVC clustering",
     "ST_GNN": "ST-GNN",
     "ST_EEGFormer": "ST-EEGFormer",
     "LaBraM": "LaBraM",
@@ -41,6 +43,7 @@ MODEL_FAMILIES = {
     "Experiment_Guided": "hypothesis-guided",
     "EEGNet_Agnostic": "deep CNN",
     "EEGNet_Clustering": "deep CNN / cluster-restricted",
+    "SVC_Clustering": "classical SVC / cluster-restricted",
     "ST_GNN": "graph deep learning",
     "ST_EEGFormer": "transformer",
     "LaBraM": "foundation model",
@@ -53,10 +56,16 @@ MODEL_COLORS = {
     "Experiment_Guided": "#7a5230",
     "EEGNet_Agnostic": "#1b9e77",
     "EEGNet_Clustering": "#66a61e",
+    "SVC_Clustering": "#17becf",
     "ST_GNN": "#b2182b",
     "ST_EEGFormer": "#756bb1",
     "LaBraM": "#c51b7d",
 }
+
+RELIABLE_SUBJECT_THRESHOLD = 0.55
+RELIABLE_SUBJECT_MIN_MODELS = 3
+RELIABLE_COHORT_DEFAULT_N = 5
+RELIABLE_COHORT_FALLBACK_N = 3
 
 ALL_CHANNELS = [
     "Fp1", "Fp2", "AF7", "AF3", "AFz", "AF4", "AF8",
@@ -75,6 +84,21 @@ CLUSTER_CHANNELS = [
     "CP3", "CP1", "CPz", "CP2", "CP4", "P5", "P3", "P1", "Pz",
     "P2", "P4", "P6", "P8", "PO3", "POz", "PO4", "PO8", "O1", "Oz", "O2",
 ]
+
+REFERENCE_N_TIMES = 192
+
+MODEL_CHANNELS = {
+    "LR_theta": ["FCz"],
+    "LR_alpha": ["Oz"],
+    "Riemann": THETA_CHANNELS + ALPHA_CHANNELS,
+    "Experiment_Guided": CLUSTER_CHANNELS,
+    "EEGNet_Agnostic": ALL_CHANNELS,
+    "EEGNet_Clustering": CLUSTER_CHANNELS,
+    "SVC_Clustering": CLUSTER_CHANNELS,
+    "ST_GNN": ALL_CHANNELS,
+    "ST_EEGFormer": ALL_CHANNELS,
+    "LaBraM": ALL_CHANNELS,
+}
 
 
 @dataclass(frozen=True)
@@ -131,6 +155,7 @@ def build_context(task_tag: str, paths, task) -> ExplainabilityContext:
 
 
 def cache_paths(paths, task_tag: str) -> dict[str, Path]:
+    comparison_cache_dir = paths.analysis_root / "cross_model_comparison" / "cache"
     if task_tag == "c_vs_ip":
         lr_dir = "c_vs_i"
         riemann_dir = "c_vs_i_riemann"
@@ -142,6 +167,7 @@ def cache_paths(paths, task_tag: str) -> dict[str, Path]:
             "Experiment_Guided": "oof_predictions_c_vs_ip_experiment_guided.npz",
             "EEGNet_Agnostic": "oof_predictions_c_vs_ip_eegnet_agnostic.npz",
             "EEGNet_Clustering": "oof_predictions_c_vs_ip_eegnet_clustering.npz",
+            "SVC_Clustering": "oof_predictions_c_vs_ip_svc_clustering.npz",
             "ST_GNN": "oof_predictions_c_vs_ip_stgnn.npz",
             "ST_EEGFormer": "oof_predictions_c_vs_ip_steegformer.npz",
             "LaBraM": "oof_predictions_c_vs_ip_labram.npz",
@@ -157,6 +183,7 @@ def cache_paths(paths, task_tag: str) -> dict[str, Path]:
             "Experiment_Guided": "oof_predictions_im_vs_ip_experiment_guided.npz",
             "EEGNet_Agnostic": "oof_predictions_im_vs_ip_eegnet_agnostic.npz",
             "EEGNet_Clustering": "oof_predictions_im_vs_ip_eegnet_clustering.npz",
+            "SVC_Clustering": "oof_predictions_im_vs_ip_svc_clustering.npz",
             "ST_GNN": "oof_predictions_im_vs_ip_stgnn.npz",
             "ST_EEGFormer": "oof_predictions_im_vs_ip_steegformer.npz",
             "LaBraM": "oof_predictions_im_vs_ip_labram.npz",
@@ -169,11 +196,12 @@ def cache_paths(paths, task_tag: str) -> dict[str, Path]:
         "LR_alpha": paths.analysis_root / lr_dir / "cache" / files["LR_alpha"],
         "Riemann": paths.analysis_root / riemann_dir / "cache" / files["Riemann"],
         "Experiment_Guided": paths.analysis_root / experiment_dir / "cache" / files["Experiment_Guided"],
-        "EEGNet_Agnostic": paths.cache_dir / files["EEGNet_Agnostic"],
-        "EEGNet_Clustering": paths.cache_dir / files["EEGNet_Clustering"],
-        "ST_GNN": paths.cache_dir / files["ST_GNN"],
-        "ST_EEGFormer": paths.cache_dir / files["ST_EEGFormer"],
-        "LaBraM": paths.cache_dir / files["LaBraM"],
+        "EEGNet_Agnostic": comparison_cache_dir / files["EEGNet_Agnostic"],
+        "EEGNet_Clustering": comparison_cache_dir / files["EEGNet_Clustering"],
+        "SVC_Clustering": comparison_cache_dir / files["SVC_Clustering"],
+        "ST_GNN": comparison_cache_dir / files["ST_GNN"],
+        "ST_EEGFormer": comparison_cache_dir / files["ST_EEGFormer"],
+        "LaBraM": comparison_cache_dir / files["LaBraM"],
     }
 
 
@@ -183,6 +211,7 @@ def final_holdout_paths(paths, task_tag: str) -> dict[str, Path]:
             "Experiment_Guided": paths.analysis_root / "experiment_guided_config_c_ip" / "tables" / "experiment_guided_config_c_ip_final_holdout_ONCE.csv",
             "EEGNet_Agnostic": paths.analysis_root / "eegnet" / "tables" / "final_holdout_c_vs_ip_eegnet.csv",
             "EEGNet_Clustering": paths.analysis_root / "eegnet" / "tables" / "final_holdout_c_vs_ip_eegnet.csv",
+            "SVC_Clustering": paths.analysis_root / "svc_clustering" / "tables" / "svc_clustering_c_vs_ip_final_holdout_ONCE.csv",
             "ST_GNN": paths.analysis_root / "c_vs_i_stgnn" / "tables" / "final_holdout_c_vs_ip_stgnn.csv",
             "ST_EEGFormer": paths.analysis_root / "c_vs_i_steegformer" / "tables" / "final_holdout_c_vs_ip_steegformer.csv",
             "LaBraM": paths.analysis_root / "c_vs_i_labram" / "tables" / "final_holdout_c_vs_ip_labram.csv",
@@ -192,6 +221,7 @@ def final_holdout_paths(paths, task_tag: str) -> dict[str, Path]:
             "Experiment_Guided": paths.analysis_root / "experiment_guided_config_im_ip" / "tables" / "experiment_guided_config_im_ip_final_holdout_ONCE.csv",
             "EEGNet_Agnostic": paths.analysis_root / "eegnet_im_vs_ip" / "tables" / "final_holdout_im_vs_ip_eegnet.csv",
             "EEGNet_Clustering": paths.analysis_root / "eegnet_im_vs_ip" / "tables" / "final_holdout_im_vs_ip_eegnet.csv",
+            "SVC_Clustering": paths.analysis_root / "svc_clustering" / "tables" / "svc_clustering_im_vs_ip_final_holdout_ONCE.csv",
             "ST_GNN": paths.analysis_root / "im_vs_i_stgnn" / "tables" / "final_holdout_im_vs_ip_stgnn.csv",
             "ST_EEGFormer": paths.analysis_root / "im_vs_i_steegformer" / "tables" / "final_holdout_im_vs_ip_steegformer.csv",
             "LaBraM": paths.analysis_root / "im_vs_i_labram" / "tables" / "final_holdout_im_vs_ip_labram.csv",
@@ -237,6 +267,26 @@ def prob_key(model_name: str, subject: str) -> str:
     return f"{subject}_prob"
 
 
+def _balanced_binary_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    scores = []
+    for label in [0, 1]:
+        mask = y_true == label
+        if mask.any():
+            scores.append(float((y_pred[mask] == y_true[mask]).mean()))
+    return float(np.mean(scores)) if scores else np.nan
+
+
+def _task_label(task_tag: str) -> str:
+    if " vs " in task_tag:
+        return task_tag
+    if "_vs_" in task_tag:
+        left, right = task_tag.split("_vs_", 1)
+        return f"{left.upper()} vs {right.upper()}"
+    return task_tag
+
+
 def load_per_subject_accuracy(paths, task, task_tag: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     subjects = safe_subject_ids(task)
     caches = cache_paths(paths, task_tag)
@@ -269,7 +319,7 @@ def load_per_subject_accuracy(paths, task, task_tag: str) -> tuple[pd.DataFrame,
                 y_prob = np.asarray(data[yp_key], dtype=float)
                 valid = ~np.isnan(y_prob)
                 if valid.any():
-                    row[model_name] = float(((y_prob[valid] >= 0.5).astype(int) == y_true[valid]).mean())
+                    row[model_name] = _balanced_binary_accuracy(y_true[valid], (y_prob[valid] >= 0.5).astype(int))
         rows.append(row)
 
     df = pd.DataFrame(rows)
@@ -281,8 +331,112 @@ def load_per_subject_accuracy(paths, task, task_tag: str) -> tuple[pd.DataFrame,
     return df, pd.DataFrame(status_rows)
 
 
-def load_oof_predictions(paths, task, task_tag: str) -> dict[str, dict[str, np.ndarray]]:
-    subjects = safe_subject_ids(task)
+def select_reliable_subject_cohort(
+    df_subject: pd.DataFrame,
+    *,
+    threshold: float = RELIABLE_SUBJECT_THRESHOLD,
+    min_models_above: int = RELIABLE_SUBJECT_MIN_MODELS,
+    default_n: int = RELIABLE_COHORT_DEFAULT_N,
+    fallback_n: int = RELIABLE_COHORT_FALLBACK_N,
+) -> pd.DataFrame:
+    """Rank and select one shared subject cohort for all model interpretations.
+
+    The selection is deliberately model-agnostic: each subject receives one rank
+    based on performance across all usable model columns. The resulting cohort is
+    then reused for every model so cross-model map differences are not driven by
+    different subject sets.
+    """
+
+    if df_subject.empty or "subject" not in df_subject.columns:
+        return pd.DataFrame(
+            columns=[
+                "subject",
+                "mean_accuracy",
+                "n_models_available",
+                "n_models_above_0_55",
+                "selected_rank",
+                "selected_for_interpretability",
+                "selection_reason",
+            ]
+        )
+
+    model_cols = [model for model in MODEL_ORDER if model in df_subject.columns]
+    out = df_subject.copy()
+    if not model_cols:
+        out["mean_accuracy"] = np.nan
+        out["n_models_available"] = 0
+        out["n_models_above_0_55"] = 0
+    else:
+        numeric = out[model_cols].apply(pd.to_numeric, errors="coerce")
+        out[model_cols] = numeric
+        out["mean_accuracy"] = numeric.mean(axis=1, skipna=True)
+        out["n_models_available"] = numeric.notna().sum(axis=1).astype(int)
+        out["n_models_above_0_55"] = numeric.ge(threshold).sum(axis=1).astype(int)
+
+    out = out.sort_values(
+        ["n_models_above_0_55", "mean_accuracy", "n_models_available", "subject"],
+        ascending=[False, False, False, True],
+        na_position="last",
+    ).reset_index(drop=True)
+    out["candidate_rank"] = np.arange(1, len(out) + 1)
+
+    reliable = out[
+        (out["n_models_above_0_55"] >= min_models_above)
+        & (out["mean_accuracy"] >= threshold)
+        & (out["n_models_available"] > 0)
+    ].copy()
+    if len(reliable) >= default_n:
+        selected_subjects = reliable.head(default_n)["subject"].tolist()
+        reason = f"top_{default_n}_reliable_subjects"
+    elif len(reliable) >= fallback_n:
+        selected_subjects = reliable.head(fallback_n)["subject"].tolist()
+        reason = f"fallback_top_{fallback_n}_reliable_subjects"
+    else:
+        selected_subjects = out.head(min(default_n, len(out)))["subject"].tolist()
+        reason = "insufficient_reliable_subjects_ranked_fallback"
+
+    selected_lookup = {subject: i + 1 for i, subject in enumerate(selected_subjects)}
+    out["selected_rank"] = out["subject"].map(selected_lookup)
+    out["selected_for_interpretability"] = out["selected_rank"].notna()
+    out["selection_reason"] = np.where(out["selected_for_interpretability"], reason, "not_selected")
+
+    ordered_cols = [
+        "subject",
+        *model_cols,
+        "mean_accuracy",
+        "n_models_available",
+        "n_models_above_0_55",
+        "candidate_rank",
+        "selected_rank",
+        "selected_for_interpretability",
+        "selection_reason",
+    ]
+    return out[ordered_cols]
+
+
+def selected_subject_ids(cohort: pd.DataFrame) -> list[str]:
+    if cohort.empty or "selected_for_interpretability" not in cohort.columns:
+        return []
+    selected = cohort[cohort["selected_for_interpretability"]].copy()
+    selected = selected.sort_values("selected_rank", na_position="last")
+    return selected["subject"].astype(str).tolist()
+
+
+def performance_summary_for_subjects(df_subject: pd.DataFrame, subjects: Sequence[str]) -> pd.DataFrame:
+    if not subjects:
+        return performance_summary(df_subject)
+    filtered = df_subject[df_subject["subject"].astype(str).isin([str(s) for s in subjects])].copy()
+    return performance_summary(filtered)
+
+
+def load_oof_predictions(
+    paths,
+    task,
+    task_tag: str,
+    *,
+    subjects: Sequence[str] | None = None,
+) -> dict[str, dict[str, np.ndarray]]:
+    subject_ids = [str(s) for s in subjects] if subjects is not None else safe_subject_ids(task)
     out: dict[str, dict[str, np.ndarray]] = {}
     for model_name, cache_file in cache_paths(paths, task_tag).items():
         fresh, _ = oof_cache_status(cache_file)
@@ -291,7 +445,7 @@ def load_oof_predictions(paths, task, task_tag: str) -> dict[str, dict[str, np.n
         y_true_all = []
         y_prob_all = []
         with np.load(cache_file, allow_pickle=True) as data:
-            for sub in subjects:
+            for sub in subject_ids:
                 yt_key = f"{sub}_y_true"
                 yp_key = prob_key(model_name, sub)
                 if yt_key not in data or yp_key not in data:
@@ -350,14 +504,57 @@ def _normalize(values: np.ndarray) -> np.ndarray:
     return arr / total if total > 0 else arr
 
 
-def _channel_vector(channels: list[str], weights: list[float]) -> np.ndarray:
+def _normalize_spatial_density(values: np.ndarray, n_available_channels: int) -> np.ndarray:
+    arr = _normalize(values)
+    support_scale = max(1, int(n_available_channels)) / len(ALL_CHANNELS)
+    return arr * support_scale
+
+
+def _normalize_temporal_density(values: np.ndarray, reference_n_times: int = REFERENCE_N_TIMES) -> np.ndarray:
+    arr = _normalize(values)
+    support_scale = len(arr) / max(1, int(reference_n_times))
+    return arr * support_scale
+
+
+def _channel_vector(channels: Sequence[str], weights: Sequence[float]) -> np.ndarray:
     values = np.zeros(len(ALL_CHANNELS), dtype=float)
     lookup = {name.upper(): i for i, name in enumerate(ALL_CHANNELS)}
     for ch, weight in zip(channels, weights):
         idx = lookup.get(ch.upper())
         if idx is not None:
             values[idx] += float(weight)
-    return _normalize(values)
+    return _normalize_spatial_density(values, len(channels))
+
+
+def _project_channel_values(channels: Sequence[str], values: np.ndarray) -> np.ndarray | None:
+    arr = np.asarray(values, dtype=float).ravel()
+    if len(channels) != len(arr):
+        return None
+    projected = np.zeros(len(ALL_CHANNELS), dtype=float)
+    lookup = {name.upper(): i for i, name in enumerate(ALL_CHANNELS)}
+    for ch, value in zip(channels, arr):
+        idx = lookup.get(ch.upper())
+        if idx is not None:
+            projected[idx] += float(value)
+    return _normalize_spatial_density(projected, len(channels))
+
+
+def _candidate_channels_for_model(model_name: str, n_values: int) -> list[str] | None:
+    channels = MODEL_CHANNELS.get(model_name)
+    if channels is not None and len(channels) == n_values:
+        return list(channels)
+    if n_values == len(ALL_CHANNELS):
+        return list(ALL_CHANNELS)
+    if n_values == len(CLUSTER_CHANNELS):
+        return list(CLUSTER_CHANNELS)
+    if model_name == "ST_EEGFormer":
+        try:
+            from .pretrained import ST_EEGFORMER_CHANNELS
+
+            return list(ST_EEGFORMER_CHANNELS[:n_values])
+        except Exception:
+            return None
+    return None
 
 
 def canonical_attribution_priors() -> dict[str, dict[str, object]]:
@@ -398,11 +595,49 @@ def canonical_attribution_priors() -> dict[str, dict[str, object]]:
             "stability": "structural_with_circularity_risk",
             "pattern": "hypothesis-guided spatiotemporal cluster restriction",
         },
+        "SVC_Clustering": {
+            "source": "model prior / cluster restriction",
+            "availability": "available_feature_definition",
+            "spatial": _channel_vector(CLUSTER_CHANNELS, [1.0] * len(CLUSTER_CHANNELS)),
+            "temporal_peak": 0.75,
+            "temporal_width": 0.75,
+            "stability": "structural_with_circularity_risk",
+            "pattern": "SVC over the shared cluster-restricted feature space",
+        },
     }
 
 
-def load_deep_attribution_summaries(paths, task, task_tag: str) -> pd.DataFrame:
-    subjects = safe_subject_ids(task)
+def _temporal_prior_vector(
+    *,
+    peak: float,
+    width: float,
+    n_times: int = 192,
+    analysis_window: tuple[float, float] = (0.0, 1.5),
+) -> np.ndarray:
+    times = np.linspace(float(analysis_window[0]), float(analysis_window[1]), int(n_times))
+    sigma = max(float(width), 1e-6)
+    values = np.exp(-0.5 * ((times - float(peak)) / sigma) ** 2)
+    return _normalize_temporal_density(values, n_times)
+
+
+def _padded_temporal_average(vectors: list[np.ndarray]) -> np.ndarray | None:
+    if not vectors:
+        return None
+    max_len = max(len(t) for t in vectors)
+    padded = np.full((len(vectors), max_len), np.nan)
+    for i, t in enumerate(vectors):
+        padded[i, : len(t)] = t
+    return _normalize_temporal_density(np.nanmean(padded, axis=0), max_len)
+
+
+def load_deep_attribution_summaries(
+    paths,
+    task,
+    task_tag: str,
+    *,
+    subjects: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    subject_ids = [str(s) for s in subjects] if subjects is not None else safe_subject_ids(task)
     rows = []
     for model_name in ["EEGNet_Agnostic", "EEGNet_Clustering", "ST_GNN", "ST_EEGFormer", "LaBraM"]:
         cache_file = cache_paths(paths, task_tag)[model_name]
@@ -420,15 +655,18 @@ def load_deep_attribution_summaries(paths, task, task_tag: str) -> pd.DataFrame:
             spatial = []
             temporal = []
             with np.load(cache_file, allow_pickle=True) as data:
-                for sub in subjects:
+                for sub in subject_ids:
                     sp_key = f"{sub}_spatial_saliency"
                     te_key = f"{sub}_temporal_saliency"
                     if sp_key in data:
                         sp = np.asarray(data[sp_key], dtype=float).ravel()
-                        if len(sp) == len(ALL_CHANNELS):
-                            spatial.append(_normalize(sp))
+                        channels = _candidate_channels_for_model(model_name, len(sp))
+                        projected = _project_channel_values(channels, sp) if channels is not None else None
+                        if projected is not None:
+                            spatial.append(projected)
                     if te_key in data:
-                        temporal.append(_normalize(np.asarray(data[te_key], dtype=float).ravel()))
+                        te = np.asarray(data[te_key], dtype=float).ravel()
+                        temporal.append(_normalize_temporal_density(te, max(len(te), 1)))
             if spatial:
                 sp_arr = np.vstack(spatial)
                 stability = float(np.nanmean(np.corrcoef(sp_arr))) if len(sp_arr) > 1 else np.nan
@@ -441,16 +679,29 @@ def load_deep_attribution_summaries(paths, task, task_tag: str) -> pd.DataFrame:
                     }
                 )
             if temporal:
-                max_len = max(len(t) for t in temporal)
-                padded = np.full((len(temporal), max_len), np.nan)
-                for i, t in enumerate(temporal):
-                    padded[i, : len(t)] = t
-                row["Temporal vector"] = _normalize(np.nanmean(padded, axis=0))
+                row["Temporal vector"] = _padded_temporal_average(temporal)
+            if fresh and not spatial and not temporal:
+                row.update(
+                    {
+                        "Attribution availability": "prediction_only_no_saliency_export",
+                        "Attribution stability": "not_available",
+                        "Attribution note": (
+                            "fresh OOF predictions are available, but this model cache does not export "
+                            "spatial_saliency/temporal_saliency arrays"
+                        ),
+                    }
+                )
         rows.append(row)
     return pd.DataFrame(rows)
 
 
-def attribution_summary(paths, task, task_tag: str) -> pd.DataFrame:
+def attribution_summary(
+    paths,
+    task,
+    task_tag: str,
+    *,
+    subjects: Sequence[str] | None = None,
+) -> pd.DataFrame:
     rows = []
     for model, info in canonical_attribution_priors().items():
         rows.append(
@@ -461,10 +712,14 @@ def attribution_summary(paths, task, task_tag: str) -> pd.DataFrame:
                 "Attribution stability": info["stability"],
                 "Attribution note": info["pattern"],
                 "Spatial vector": info["spatial"],
-                "Temporal vector": None,
+                "Temporal vector": _temporal_prior_vector(
+                    peak=float(info["temporal_peak"]),
+                    width=float(info["temporal_width"]),
+                    analysis_window=task.analysis_window,
+                ),
             }
         )
-    deep = load_deep_attribution_summaries(paths, task, task_tag)
+    deep = load_deep_attribution_summaries(paths, task, task_tag, subjects=subjects)
     return pd.concat([pd.DataFrame(rows), deep], ignore_index=True)
 
 
@@ -489,6 +744,7 @@ def performance_summary(df_subject: pd.DataFrame) -> pd.DataFrame:
 
 def build_evidence_table(paths, task, task_tag: str) -> tuple[pd.DataFrame, Mapping[str, object]]:
     df_subject, df_cache = load_per_subject_accuracy(paths, task, task_tag)
+    cohort = select_reliable_subject_cohort(df_subject)
     perf = performance_summary(df_subject)
     final = load_final_holdout_summary(paths, task_tag)
     attr = attribution_summary(paths, task, task_tag).drop(columns=["Spatial vector", "Temporal vector"])
@@ -510,7 +766,42 @@ def build_evidence_table(paths, task, task_tag: str) -> tuple[pd.DataFrame, Mapp
     table["Confound risk level"] = table.apply(_confound_risk, axis=1)
     table["Thesis-use recommendation"] = table.apply(_recommendation, axis=1)
     table = table.sort_values(["Mean accuracy", "N subjects"], ascending=[False, False], na_position="last")
-    return table, {"subjects": df_subject, "cache_status": df_cache}
+    return table, {"subjects": df_subject, "cache_status": df_cache, "selected_cohort": cohort}
+
+
+def selected_cohort_model_evidence(
+    evidence: pd.DataFrame,
+    df_subject: pd.DataFrame,
+    subjects: Sequence[str],
+) -> pd.DataFrame:
+    """Recompute model accuracy summaries on the selected shared cohort."""
+
+    selected_perf = performance_summary_for_subjects(df_subject, subjects)
+    selected_perf = selected_perf.rename(
+        columns={
+            "Mean accuracy": "Selected cohort mean accuracy",
+            "Std accuracy": "Selected cohort std accuracy",
+            "N subjects": "Selected cohort N subjects",
+            "Above 0.5": "Selected cohort above 0.5",
+        }
+    )
+    out = evidence.merge(
+        selected_perf[
+            [
+                "Model",
+                "Selected cohort mean accuracy",
+                "Selected cohort std accuracy",
+                "Selected cohort N subjects",
+                "Selected cohort above 0.5",
+            ]
+        ],
+        on="Model",
+        how="left",
+    )
+    out["Selected cohort reliability weight"] = (
+        out["Selected cohort mean accuracy"].astype(float) - 0.5
+    ).clip(lower=0.0).fillna(0.0)
+    return out
 
 
 def _confound_risk(row: pd.Series) -> str:
@@ -518,7 +809,7 @@ def _confound_risk(row: pd.Series) -> str:
     if not bool(row.get("OOF usable", False)):
         return "high: missing/stale validation artifact"
     margin = row.get("Reliability margin", np.nan)
-    if model == "Experiment_Guided" or model == "EEGNet_Clustering":
+    if model in {"Experiment_Guided", "EEGNet_Clustering", "SVC_Clustering"}:
         return "medium-high: cluster-selection circularity risk"
     if model in {"ST_EEGFormer", "LaBraM"}:
         return "medium-high: adaptation/cache sensitivity"
@@ -555,9 +846,59 @@ def evidence_pyramid(evidence: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["Evidence tier", "Mean accuracy"], ascending=[True, False], na_position="last")
 
 
-def convergence_table(evidence: pd.DataFrame, paths, task, task_tag: str) -> pd.DataFrame:
-    attr = attribution_summary(paths, task, task_tag)
-    weights = evidence.set_index("Model")["Reliability margin"].clip(lower=0.0).fillna(0.0)
+def model_interpretation_table(evidence: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for _, row in evidence.sort_values("Model", key=lambda s: s.map({m: i for i, m in enumerate(MODEL_ORDER)})).iterrows():
+        model = row["Model"]
+        selected_acc = row.get("Selected cohort mean accuracy", np.nan)
+        weight = row.get("Selected cohort reliability weight", np.nan)
+        attr = str(row.get("Attribution availability", "unknown"))
+        if pd.isna(selected_acc):
+            evidence_read = "No selected-cohort validation estimate is available in this runtime."
+        elif float(selected_acc) <= 0.5:
+            evidence_read = "Do not interpret as evidence; selected-cohort decoding is at or below chance."
+        elif float(selected_acc) < RELIABLE_SUBJECT_THRESHOLD:
+            evidence_read = "Weak diagnostic only; selected-cohort decoding is above chance but below the reliability threshold."
+        else:
+            evidence_read = "Interpretable with caution; selected-cohort decoding clears the reliability threshold."
+
+        if attr == "available_feature_definition":
+            attribution_read = "Structural/feature-defined attribution, normalized by model channel support."
+        elif attr == "available_saliency_cache":
+            attribution_read = "Cached model saliency is available and projected into the shared channel layout."
+        elif attr == "prediction_only_no_saliency_export":
+            attribution_read = "Predictions are available, but this cache does not export saliency arrays; no DL map should be overread."
+        else:
+            attribution_read = "Attribution artifact is missing or stale."
+
+        rows.append(
+            {
+                "Model": MODEL_LABELS.get(model, model),
+                "Family": row.get("Family", ""),
+                "Selected cohort accuracy": selected_acc,
+                "Reliability weight": weight,
+                "Attribution status": attr,
+                "Evidence interpretation": evidence_read,
+                "Attribution interpretation": attribution_read,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def convergence_table(
+    evidence: pd.DataFrame,
+    paths,
+    task,
+    task_tag: str,
+    *,
+    subjects: Sequence[str] | None = None,
+    weight_col: str = "Reliability margin",
+) -> pd.DataFrame:
+    attr = attribution_summary(paths, task, task_tag, subjects=subjects)
+    if weight_col in evidence.columns:
+        weights = evidence.set_index("Model")[weight_col].clip(lower=0.0).fillna(0.0)
+    else:
+        weights = evidence.set_index("Model")["Reliability margin"].clip(lower=0.0).fillna(0.0)
     rows = []
     for _, row in attr.iterrows():
         model = row["Model"]
@@ -616,7 +957,16 @@ def synthesis_text(context: ExplainabilityContext, evidence: pd.DataFrame, conve
     )
 
 
-def save_tables(paths, task_tag: str, evidence: pd.DataFrame, pyramid: pd.DataFrame, convergence: pd.DataFrame) -> None:
+def save_tables(
+    paths,
+    task_tag: str,
+    evidence: pd.DataFrame,
+    pyramid: pd.DataFrame,
+    convergence: pd.DataFrame,
+    *,
+    selected_cohort: pd.DataFrame | None = None,
+    consensus: pd.DataFrame | None = None,
+) -> None:
     paths.tables_dir.mkdir(parents=True, exist_ok=True)
     export = evidence.copy()
     for col in export.columns:
@@ -625,6 +975,10 @@ def save_tables(paths, task_tag: str, evidence: pd.DataFrame, pyramid: pd.DataFr
     export.to_csv(paths.tables_dir / f"explainability_evidence_table_{task_tag}.csv", index=False)
     pyramid.to_csv(paths.tables_dir / f"explainability_evidence_pyramid_{task_tag}.csv", index=False)
     convergence.to_csv(paths.tables_dir / f"explainability_convergence_{task_tag}.csv", index=False)
+    if selected_cohort is not None:
+        selected_cohort.to_csv(paths.tables_dir / f"selected_interpretability_subjects_{task_tag}.csv", index=False)
+    if consensus is not None:
+        consensus.to_csv(paths.tables_dir / f"explainability_consensus_diagnostic_{task_tag}.csv", index=False)
 
 
 def plot_evidence_overview(evidence: pd.DataFrame, task_tag: str, *, save_path: Path | None = None):
@@ -642,7 +996,7 @@ def plot_evidence_overview(evidence: pd.DataFrame, task_tag: str, *, save_path: 
     ax.axvline(0.5, color="black", linestyle="--", linewidth=1.2, label="nominal chance")
     ax.set_xlim(0.45, max(0.7, float(plot_df["Mean accuracy"].max()) + 0.04))
     ax.set_xlabel("Mean subject OOF accuracy")
-    ax.set_title(f"Performance-weighted explainability evidence: {task_tag}", fontweight="bold")
+    ax.set_title(f"Performance-weighted explainability evidence: {_task_label(task_tag)}", fontweight="bold")
     ax.legend(loc="lower right")
     sns.despine(fig=fig)
     fig.tight_layout()
@@ -664,8 +1018,377 @@ def plot_convergence(convergence: pd.DataFrame, task_tag: str, *, save_path: Pat
     ax.set_xticks(x)
     ax.set_xticklabels(plot_df["Display"], rotation=35, ha="right")
     ax.set_ylabel("Attribution mass / structural prior mass")
-    ax.set_title(f"Cross-model sensor-region convergence: {task_tag}", fontweight="bold")
+    ax.set_title(f"Cross-model sensor-region convergence: {_task_label(task_tag)}", fontweight="bold")
     ax.legend()
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def _safe_spatial_vector(value) -> np.ndarray | None:
+    if value is None or np.isscalar(value):
+        return None
+    arr = np.asarray(value, dtype=float).ravel()
+    if arr.size != len(ALL_CHANNELS):
+        return None
+    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _safe_temporal_vector(value) -> np.ndarray | None:
+    if value is None or np.isscalar(value):
+        return None
+    arr = np.asarray(value, dtype=float).ravel()
+    if arr.size == 0:
+        return None
+    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _time_axis(n_times: int, task) -> np.ndarray:
+    start, stop = task.analysis_window
+    return np.linspace(float(start), float(stop), int(n_times))
+
+
+def _cosine_similarity(a: np.ndarray | None, b: np.ndarray | None) -> float:
+    if a is None or b is None:
+        return np.nan
+    denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+    return float(np.dot(a, b) / denom) if denom > 0 else np.nan
+
+
+def consensus_diagnostic(
+    evidence: pd.DataFrame,
+    paths,
+    task,
+    task_tag: str,
+    *,
+    subjects: Sequence[str],
+    df_subject: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, np.ndarray | float | None]]:
+    """Build exploratory weighted/unweighted consensus summaries for the shared cohort."""
+
+    attr = attribution_summary(paths, task, task_tag, subjects=subjects)
+    if "Selected cohort reliability weight" in evidence.columns:
+        weights = evidence.set_index("Model")["Selected cohort reliability weight"].fillna(0.0)
+    else:
+        weights = evidence.set_index("Model")["Reliability margin"].clip(lower=0.0).fillna(0.0)
+
+    spatial_rows = []
+    temporal_rows = []
+    summary_rows = []
+    for _, row in attr.iterrows():
+        model = row["Model"]
+        spatial = _safe_spatial_vector(row["Spatial vector"])
+        temporal = _safe_temporal_vector(row["Temporal vector"])
+        weight = float(weights.get(model, 0.0))
+        if spatial is not None:
+            spatial_rows.append((model, weight, spatial))
+        if temporal is not None:
+            temporal_rows.append((model, weight, temporal))
+        peak_time = np.nan
+        if temporal is not None:
+            times = _time_axis(len(temporal), task)
+            peak_time = float(times[int(np.nanargmax(np.abs(temporal)))])
+        summary_rows.append(
+            {
+                "Model": model,
+                "Display": MODEL_LABELS.get(model, model),
+                "Selected cohort reliability weight": weight,
+                "Attribution availability": row["Attribution availability"],
+                "Included in weighted consensus": bool(weight > 0 and spatial is not None),
+                "Temporal peak time (s)": peak_time,
+            }
+        )
+
+    def aggregate(rows: list[tuple[str, float, np.ndarray]], weighted: bool) -> np.ndarray | None:
+        if not rows:
+            return None
+        arrays = np.vstack([item[2] for item in rows])
+        if weighted:
+            w = np.asarray([item[1] for item in rows], dtype=float)
+            if float(w.sum()) <= 0:
+                return None
+            return np.average(arrays, axis=0, weights=w)
+        return np.nanmean(arrays, axis=0)
+
+    weighted_spatial = aggregate(spatial_rows, weighted=True)
+    unweighted_spatial = aggregate(spatial_rows, weighted=False)
+    weighted_temporal = aggregate(temporal_rows, weighted=True)
+    unweighted_temporal = aggregate(temporal_rows, weighted=False)
+
+    selected_df = df_subject[df_subject["subject"].astype(str).isin([str(s) for s in subjects])].copy()
+    model_cols = [model for model in MODEL_ORDER if model in selected_df.columns]
+    boot_std = np.nan
+    if len(selected_df) >= 5 and model_cols:
+        rng = np.random.default_rng(42)
+        boot_scores = []
+        numeric = selected_df[model_cols].apply(pd.to_numeric, errors="coerce")
+        for _ in range(500):
+            idx = rng.integers(0, len(numeric), len(numeric))
+            sampled = numeric.iloc[idx]
+            boot_scores.append(float(np.nanmean(sampled.to_numpy())))
+        boot_std = float(np.nanstd(boot_scores))
+
+    summary = pd.DataFrame(summary_rows)
+    summary["Weighted vs unweighted spatial cosine"] = _cosine_similarity(weighted_spatial, unweighted_spatial)
+    summary["Weighted vs unweighted temporal cosine"] = _cosine_similarity(weighted_temporal, unweighted_temporal)
+    summary["Bootstrap selected-subject mean-accuracy std"] = boot_std
+
+    vectors: dict[str, np.ndarray | float | None] = {
+        "weighted_spatial": weighted_spatial,
+        "unweighted_spatial": unweighted_spatial,
+        "weighted_temporal": weighted_temporal,
+        "unweighted_temporal": unweighted_temporal,
+        "bootstrap_std": boot_std,
+    }
+    return summary, vectors
+
+
+def _plot_topomap(ax, values: np.ndarray, *, title: str, cmap: str, vlim: float | None = None):
+    import matplotlib.pyplot as plt
+    import matplotlib.tri as mtri
+
+    xy = _channel_xy()
+    if vlim is None:
+        vmax = float(np.nanmax(np.abs(values))) if np.size(values) else 0.0
+        vlim = vmax if vmax > 0 else 1.0
+    x = xy[:, 0]
+    y = xy[:, 1]
+    head = plt.Circle((0, 0), 1.08, color="black", fill=False, linewidth=1.0)
+    ax.add_patch(head)
+    ax.plot([0.0, -0.08, 0.08, 0.0], [1.08, 1.18, 1.18, 1.08], color="black", linewidth=1.0)
+    try:
+        triang = mtri.Triangulation(x, y)
+        im = ax.tricontourf(triang, values, levels=15, cmap=cmap, vmin=-vlim, vmax=vlim)
+    except Exception:
+        im = ax.scatter(x, y, c=values, cmap=cmap, vmin=-vlim, vmax=vlim, s=80)
+    ax.scatter(x, y, c="black", s=5, alpha=0.65)
+    ax.set_aspect("equal")
+    ax.set_xlim(-1.2, 1.2)
+    ax.set_ylim(-1.2, 1.22)
+    ax.axis("off")
+    ax.set_title(title, fontsize=9)
+    return im
+
+
+def _channel_xy() -> np.ndarray:
+    return np.asarray([_channel_position(ch) for ch in ALL_CHANNELS], dtype=float)
+
+
+def _channel_position(ch_name: str) -> tuple[float, float]:
+    import re
+
+    ch = ch_name.upper()
+    prefix = re.sub(r"[0-9Z]+$", "", ch)
+    suffix_match = re.search(r"([0-9]+|Z)$", ch)
+    suffix = suffix_match.group(1) if suffix_match else "Z"
+    row_y = {
+        "FP": 0.98,
+        "AF": 0.78,
+        "F": 0.56,
+        "FT": 0.35,
+        "FC": 0.30,
+        "T": 0.00,
+        "C": 0.00,
+        "TP": -0.28,
+        "CP": -0.34,
+        "P": -0.58,
+        "PO": -0.78,
+        "O": -0.96,
+    }
+    y = row_y.get(prefix, 0.0)
+    if suffix == "Z":
+        return 0.0, y
+    number = int(suffix)
+    side = -1.0 if number % 2 else 1.0
+    rank = {1: 0.18, 2: 0.18, 3: 0.38, 4: 0.38, 5: 0.58, 6: 0.58, 7: 0.82, 8: 0.82}.get(number, 0.95)
+    if prefix in {"T", "FT", "TP"}:
+        rank = min(0.98, rank + 0.08)
+    if prefix in {"O", "PO"}:
+        rank = min(0.78, rank)
+    return side * rank, y
+
+
+def plot_shared_cohort_spatial_topomaps(
+    evidence: pd.DataFrame,
+    paths,
+    task,
+    task_tag: str,
+    *,
+    subjects: Sequence[str],
+    save_path: Path | None = None,
+):
+    import matplotlib.pyplot as plt
+
+    attr = attribution_summary(paths, task, task_tag, subjects=subjects)
+    attr = attr.set_index("Model")
+    fig, axes = plt.subplots(2, 5, figsize=(15, 6), dpi=150)
+    spatial_vectors = [
+        _safe_spatial_vector(attr.loc[model, "Spatial vector"]) if model in attr.index else None
+        for model in MODEL_ORDER
+    ]
+    vmax = max([float(np.nanmax(np.abs(v))) for v in spatial_vectors if v is not None] or [1.0])
+    for ax, model, vector in zip(axes.ravel(), MODEL_ORDER, spatial_vectors):
+        if vector is None:
+            ax.axis("off")
+            ax.set_title(f"{MODEL_LABELS[model]}\nno map", fontsize=9)
+            continue
+        weight = evidence.set_index("Model").get("Selected cohort reliability weight", pd.Series(dtype=float)).get(model, np.nan)
+        title = f"{MODEL_LABELS[model]}\nw={weight:.3f}" if pd.notna(weight) else MODEL_LABELS[model]
+        _plot_topomap(ax, vector, title=title, cmap="RdBu_r", vlim=vmax)
+    fig.suptitle(f"Shared-cohort spatial importance: {_task_label(task_tag)}", fontweight="bold")
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_shared_cohort_temporal_saliency(
+    evidence: pd.DataFrame,
+    paths,
+    task,
+    task_tag: str,
+    *,
+    subjects: Sequence[str],
+    save_path: Path | None = None,
+):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    attr = attribution_summary(paths, task, task_tag, subjects=subjects)
+    fig, ax = plt.subplots(figsize=(11, 5), dpi=150)
+    weights = evidence.set_index("Model").get("Selected cohort reliability weight", pd.Series(dtype=float))
+    for _, row in attr.iterrows():
+        temporal = _safe_temporal_vector(row["Temporal vector"])
+        if temporal is None:
+            continue
+        times = _time_axis(len(temporal), task)
+        model = row["Model"]
+        weight = float(weights.get(model, 0.0)) if model in weights.index else 0.0
+        alpha = 0.95 if weight > 0 else 0.35
+        linestyle = "-" if weight > 0 else "--"
+        ax.plot(
+            times,
+            np.abs(temporal),
+            color=MODEL_COLORS.get(model, "#777777"),
+            label=f"{MODEL_LABELS.get(model, model)} (w={weight:.3f})",
+            linewidth=2,
+            alpha=alpha,
+            linestyle=linestyle,
+        )
+    ax.set_title(f"Shared-cohort temporal saliency: {_task_label(task_tag)}", fontweight="bold")
+    ax.set_xlabel("Time from stimulus onset (s)")
+    ax.set_ylabel("Normalized importance")
+    ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=8)
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_peak_time_difference_topomaps(
+    evidence: pd.DataFrame,
+    paths,
+    task,
+    task_tag: str,
+    *,
+    subjects: Sequence[str],
+    save_path: Path | None = None,
+):
+    import matplotlib.pyplot as plt
+
+    attr = attribution_summary(paths, task, task_tag, subjects=subjects).set_index("Model")
+    model_vectors = {}
+    peak_times = {}
+    for model in MODEL_ORDER:
+        if model not in attr.index:
+            continue
+        spatial = _safe_spatial_vector(attr.loc[model, "Spatial vector"])
+        temporal = _safe_temporal_vector(attr.loc[model, "Temporal vector"])
+        if spatial is None:
+            continue
+        scale = 1.0
+        peak_time = np.nan
+        if temporal is not None:
+            idx = int(np.nanargmax(np.abs(temporal)))
+            scale = float(np.abs(temporal[idx]))
+            peak_time = float(_time_axis(len(temporal), task)[idx])
+        model_vectors[model] = spatial * scale
+        peak_times[model] = peak_time
+
+    if not model_vectors:
+        print("No spatial attribution vectors available for peak-time difference topomaps.")
+        return None
+
+    average = np.nanmean(np.vstack(list(model_vectors.values())), axis=0)
+    fig, axes = plt.subplots(2, 5, figsize=(15, 6), dpi=150)
+    diffs = [model_vectors[model] - average for model in model_vectors]
+    vmax = max([float(np.nanmax(np.abs(d))) for d in diffs] or [1.0])
+    for ax, model in zip(axes.ravel(), MODEL_ORDER):
+        if model not in model_vectors:
+            ax.axis("off")
+            ax.set_title(f"{MODEL_LABELS[model]}\nno map", fontsize=9)
+            continue
+        peak = peak_times.get(model, np.nan)
+        title = f"{MODEL_LABELS[model]}\npeak {peak:.2f}s minus avg" if pd.notna(peak) else f"{MODEL_LABELS[model]}\nminus avg"
+        _plot_topomap(ax, model_vectors[model] - average, title=title, cmap="RdBu_r", vlim=vmax)
+    fig.suptitle(f"Peak-time model-minus-average topomaps: {_task_label(task_tag)}", fontweight="bold")
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig
+
+
+def plot_consensus_diagnostic(
+    vectors: Mapping[str, np.ndarray | float | None],
+    task,
+    task_tag: str,
+    *,
+    save_path: Path | None = None,
+):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    weighted_spatial = _safe_spatial_vector(vectors.get("weighted_spatial"))
+    unweighted_spatial = _safe_spatial_vector(vectors.get("unweighted_spatial"))
+    weighted_temporal = _safe_temporal_vector(vectors.get("weighted_temporal"))
+    unweighted_temporal = _safe_temporal_vector(vectors.get("unweighted_temporal"))
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8), dpi=150)
+
+    spatial_vmax = max(
+        [float(np.nanmax(np.abs(v))) for v in [weighted_spatial, unweighted_spatial] if v is not None] or [1.0]
+    )
+    for ax, vector, title in [
+        (axes[0, 0], weighted_spatial, "Weighted consensus"),
+        (axes[0, 1], unweighted_spatial, "Unweighted consensus"),
+    ]:
+        if vector is None:
+            ax.axis("off")
+            ax.set_title(f"{title}\nnot available")
+        else:
+            _plot_topomap(ax, vector, title=title, cmap="RdBu_r", vlim=spatial_vmax)
+
+    for vector, label, color, linestyle in [
+        (weighted_temporal, "Weighted", "black", "-"),
+        (unweighted_temporal, "Unweighted", "gray", "--"),
+    ]:
+        if vector is not None:
+            axes[1, 0].plot(_time_axis(len(vector), task), np.abs(vector), label=label, color=color, linestyle=linestyle)
+    axes[1, 0].set_title("Temporal consensus")
+    axes[1, 0].set_xlabel("Time from stimulus onset (s)")
+    axes[1, 0].set_ylabel("Normalized importance")
+    axes[1, 0].legend()
+
+    if weighted_spatial is not None and unweighted_spatial is not None:
+        diff = weighted_spatial - unweighted_spatial
+        _plot_topomap(axes[1, 1], diff, title="Weighted minus unweighted", cmap="RdBu_r")
+    else:
+        axes[1, 1].axis("off")
+        axes[1, 1].set_title("Weighted minus unweighted\nnot available")
+
+    fig.suptitle(f"Experimental consensus diagnostic: {_task_label(task_tag)}", fontweight="bold")
     sns.despine(fig=fig)
     fig.tight_layout()
     if save_path is not None:
