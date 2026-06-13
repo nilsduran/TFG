@@ -64,8 +64,9 @@ MODEL_COLORS = {
 
 RELIABLE_SUBJECT_THRESHOLD = 0.55
 RELIABLE_SUBJECT_MIN_MODELS = 3
-RELIABLE_COHORT_DEFAULT_N = 5
-RELIABLE_COHORT_FALLBACK_N = 3
+RELIABLE_SUBJECT_MIN_MODEL_FRACTION = 0.30
+RELIABLE_COHORT_DEFAULT_N = 10
+RELIABLE_COHORT_DIAGNOSTIC_MIN_N = 5
 
 ALL_CHANNELS = [
     "Fp1", "Fp2", "AF7", "AF3", "AFz", "AF4", "AF8",
@@ -336,8 +337,9 @@ def select_reliable_subject_cohort(
     *,
     threshold: float = RELIABLE_SUBJECT_THRESHOLD,
     min_models_above: int = RELIABLE_SUBJECT_MIN_MODELS,
+    min_model_fraction: float = RELIABLE_SUBJECT_MIN_MODEL_FRACTION,
     default_n: int = RELIABLE_COHORT_DEFAULT_N,
-    fallback_n: int = RELIABLE_COHORT_FALLBACK_N,
+    diagnostic_min_n: int = RELIABLE_COHORT_DIAGNOSTIC_MIN_N,
 ) -> pd.DataFrame:
     """Rank and select one shared subject cohort for all model interpretations.
 
@@ -354,8 +356,11 @@ def select_reliable_subject_cohort(
                 "mean_accuracy",
                 "n_models_available",
                 "n_models_above_0_55",
+                "fraction_models_above_0_55",
+                "meets_reliable_subject_rule",
                 "selected_rank",
                 "selected_for_interpretability",
+                "selected_cohort_role",
                 "selection_reason",
             ]
         )
@@ -366,12 +371,17 @@ def select_reliable_subject_cohort(
         out["mean_accuracy"] = np.nan
         out["n_models_available"] = 0
         out["n_models_above_0_55"] = 0
+        out["fraction_models_above_0_55"] = np.nan
     else:
         numeric = out[model_cols].apply(pd.to_numeric, errors="coerce")
         out[model_cols] = numeric
         out["mean_accuracy"] = numeric.mean(axis=1, skipna=True)
         out["n_models_available"] = numeric.notna().sum(axis=1).astype(int)
         out["n_models_above_0_55"] = numeric.ge(threshold).sum(axis=1).astype(int)
+        out["fraction_models_above_0_55"] = np.divide(
+            out["n_models_above_0_55"],
+            out["n_models_available"].replace(0, np.nan),
+        )
 
     out = out.sort_values(
         ["n_models_above_0_55", "mean_accuracy", "n_models_available", "subject"],
@@ -380,24 +390,41 @@ def select_reliable_subject_cohort(
     ).reset_index(drop=True)
     out["candidate_rank"] = np.arange(1, len(out) + 1)
 
-    reliable = out[
-        (out["n_models_above_0_55"] >= min_models_above)
+    out["meets_reliable_subject_rule"] = (
+        (out["n_models_available"] > 0)
         & (out["mean_accuracy"] >= threshold)
-        & (out["n_models_available"] > 0)
-    ].copy()
+        & (
+            (out["n_models_above_0_55"] >= min_models_above)
+            | (out["fraction_models_above_0_55"] >= min_model_fraction)
+        )
+    )
+    reliable = out[out["meets_reliable_subject_rule"]].copy()
     if len(reliable) >= default_n:
         selected_subjects = reliable.head(default_n)["subject"].tolist()
         reason = f"top_{default_n}_reliable_subjects"
-    elif len(reliable) >= fallback_n:
-        selected_subjects = reliable.head(fallback_n)["subject"].tolist()
-        reason = f"fallback_top_{fallback_n}_reliable_subjects"
+    elif len(reliable) >= diagnostic_min_n:
+        selected_subjects = reliable["subject"].tolist()
+        reason = f"{len(selected_subjects)}_reliable_subjects"
+    elif len(reliable) > 0:
+        reliable_subjects = reliable["subject"].tolist()
+        supplement_n = min(diagnostic_min_n, len(out)) - len(reliable_subjects)
+        supplement = out[
+            ~out["subject"].astype(str).isin([str(s) for s in reliable_subjects])
+        ].head(max(supplement_n, 0))["subject"].tolist()
+        selected_subjects = reliable_subjects + supplement
+        reason = "reliable_core_plus_low_confidence_diagnostic_subjects"
     else:
-        selected_subjects = out.head(min(default_n, len(out)))["subject"].tolist()
-        reason = "insufficient_reliable_subjects_ranked_fallback"
+        selected_subjects = out.head(min(diagnostic_min_n, len(out)))["subject"].tolist()
+        reason = "no_reliable_subjects_ranked_diagnostic_fallback"
 
     selected_lookup = {subject: i + 1 for i, subject in enumerate(selected_subjects)}
     out["selected_rank"] = out["subject"].map(selected_lookup)
     out["selected_for_interpretability"] = out["selected_rank"].notna()
+    out["selected_cohort_role"] = np.where(
+        out["selected_for_interpretability"],
+        np.where(out["meets_reliable_subject_rule"], "reliable", "low_confidence_diagnostic"),
+        "not_selected",
+    )
     out["selection_reason"] = np.where(out["selected_for_interpretability"], reason, "not_selected")
 
     ordered_cols = [
@@ -406,9 +433,12 @@ def select_reliable_subject_cohort(
         "mean_accuracy",
         "n_models_available",
         "n_models_above_0_55",
+        "fraction_models_above_0_55",
+        "meets_reliable_subject_rule",
         "candidate_rank",
         "selected_rank",
         "selected_for_interpretability",
+        "selected_cohort_role",
         "selection_reason",
     ]
     return out[ordered_cols]
