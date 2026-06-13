@@ -1,4 +1,4 @@
-# Extended Project README
+﻿# Extended Project README
 
 ## Purpose of this document
 
@@ -40,19 +40,19 @@ The original paper emphasizes two frequency bands and two spatial regions:
 - **Fronto-medial theta power**, approximately 5-7 Hz, associated with conflict monitoring and often linked to medial frontal regions such as the anterior cingulate cortex.
 - **Parieto-occipital alpha power**, approximately 8-12 Hz, associated with visual attention, inhibition, and sensory gating. In this context, lower alpha power can be interpreted as stronger visual engagement or reduced inhibition.
 
-This TFG does not simply reproduce the paper's statistical analysis. Instead, it asks whether single-trial EEG decoding and modern machine learning can distinguish perceptual/stimulus conditions related to conflict. The project therefore sits between cognitive neuroscience and applied machine learning: the models are not only evaluated for accuracy, but also for whether their spatial, temporal, and spectral behavior is compatible with the known BR conflict framework.
+This TFG begins from the original paper's statistical analysis and then expands it. The first aim is to reproduce the paper's main theta/alpha findings as a grounding step. The second aim is methodological: instead of only using the paper's one-dimensional temporal clustering within predefined regions, the project extends the analysis to two-dimensional spatiotemporal clustering across channels and time. The third aim is to ask whether single-trial EEG decoding and modern machine learning can distinguish perceptual/stimulus conditions related to conflict. The project therefore sits between cognitive neuroscience and applied machine learning: the models are not only evaluated for accuracy, but also for whether their spatial, temporal, and spectral behavior is compatible with the known BR conflict framework.
 
 ## Main objectives
 
 The project has four main objectives.
 
-First, it explores the EEG dataset and the behavioral structure of the task. This includes checking class imbalance, subject-level dominance biases, color and eye biases, possible session fatigue, and the number of usable trials per subject. This step is necessary because EEG decoding can be easily distorted by class imbalance, temporal drift, or subject-specific response patterns.
+First, it aims to **replicate the main results of the original binocular-rivalry paper**. This means checking whether the expected theta and alpha effects can be recovered in the available EEG data and whether the project reproduces the basic interpretation of fronto-medial theta and parieto-occipital alpha as conflict-related sensor-level signatures.
 
-Second, it builds classical machine learning baselines using interpretable features. These include logistic regression on theta/alpha band-envelope features and Riemannian covariance classification with LDA. These methods are important because they are relatively transparent and well matched to EEG: they make explicit assumptions about oscillatory power, covariance structure, and low-sample classification.
+Second, it expands the paper's statistical approach through **two-dimensional spatiotemporal clustering**. Where the original analysis focused on temporal clustering within predefined regions or signals, this project searches for structured channel-time regions in theta and alpha bands for both C vs IP and IM vs IP. This makes clustering one of the core methodological contributions, not just a preprocessing step.
 
-Third, it evaluates deep learning and pretrained EEG models, including EEGNet, a spatio-temporal graph neural network, ST-EEGFormer, and LaBraM. These models test whether more expressive architectures can learn better representations from raw or lightly processed EEG trials.
+Third, it extends the analysis from condition-level statistics to **single-trial decoding**. This includes interpretable classical baselines such as logistic regression, Riemannian covariance classification with LDA, and SVC clustering, as well as deep learning and pretrained EEG models such as EEGNet, a spatio-temporal graph neural network, ST-EEGFormer, and LaBraM.
 
-Fourth, it compares models and interprets their behavior. The work includes cross-model benchmarking, saliency and SHAP-style explainability notebooks, cluster-based spatiotemporal analysis, and summary plots. The thesis-relevant aim is not just "which model wins", but what the performance pattern says about the detectability of binocular-rivalry conflict in EEG.
+Fourth, it interprets the full pattern of results. The thesis-relevant aim is not just "which model wins", but whether the replicated statistics, the spatiotemporal clusters, the decoding benchmarks, and the explainability outputs tell a coherent story about the detectability of binocular-rivalry conflict in EEG.
 
 ## Experimental paradigm
 
@@ -84,9 +84,9 @@ im_vs_ip:
   max subjects = 29
 ```
 
-The **C vs IP** task is the main hypothesis-driven contrast. Both conditions are reported as pure percepts, but only IP contains physical interocular conflict. A successful classifier should therefore be sensitive to neural differences related to conflict resolution rather than only to the reported percept category.
+The **C vs IP** task is one of the two central contrasts. Both conditions are reported as pure percepts, but only IP contains physical interocular conflict. A successful classifier should therefore be sensitive to neural differences related to conflict resolution rather than only to the reported percept category.
 
-The **IM vs IP** task is more exploratory. Both classes are incongruent trials, so the physical stimulus class is closer, but the reported percept differs. This contrast asks whether EEG contains enough information to distinguish unresolved/mixed rivalry from resolved/pure rivalry.
+The **IM vs IP** task is also central, but it targets a different question. Both classes are incongruent trials, so the physical stimulus class is closer, but the reported percept differs. This contrast asks whether EEG contains enough information to distinguish unresolved/mixed rivalry from resolved/pure rivalry.
 
 ## EEG concepts needed for the thesis
 
@@ -210,152 +210,49 @@ This project relies on three interpretations:
 - **Conflict resolution**: IP is treated as an incongruent trial where the system resolved competition into one dominant percept.
 - **Unstable or mixed perception**: IM is treated as a case where competition was not resolved into one pure percept during the reporting-relevant interval.
 
-The main theoretical expectation is that IP should differ from C in fronto-medial theta and parieto-occipital alpha because IP requires resolving interocular conflict. The IM vs IP contrast is more uncertain. The paper notes an exploratory expectation that mixed percepts might reflect stronger conflict, but the project results show that decoding IM vs IP is generally harder and often near chance.
+The theoretical expectation is that IP should differ from C in fronto-medial theta and parieto-occipital alpha because IP requires resolving interocular conflict. The IM vs IP contrast tests a complementary question: whether mixed and pure perceptual outcomes differ when both trial types contain interocular conflict. The paper notes that mixed percepts might reflect stronger or less resolved conflict, but the project results show that decoding IM vs IP is generally harder and often near chance.
 
 ## Statistical and machine learning concepts
 
-### Binary classification
+This section should support the thesis methods without becoming a second textbook. The essential point is that the project treats decoding as a controlled comparison of EEG representations, not as a generic prediction challenge.
 
-Most notebooks formulate the task as binary classification:
+### Binary decoding and class balance
+
+Most analyses use binary classification on single EEG trials:
 
 ```math
 f_\theta(X_i) \rightarrow \hat{y}_i \in \{0, 1\}
 ```
 
-where `X_i` is one EEG trial and `y_i` is the condition label. Accuracy is:
+The two central contrasts are **C vs IP** and **IM vs IP**. They should both be presented as scientifically important: C vs IP asks whether physical interocular conflict can be detected when the reported percept is pure, while IM vs IP asks whether resolved and mixed incongruent percepts differ in EEG.
 
-```math
-Accuracy = \frac{TP + TN}{TP + TN + FP + FN}
-```
-
-Balanced accuracy is useful when fold-level labels are not perfectly balanced:
-
-```math
-BalancedAccuracy = \frac{1}{2}\left(\frac{TP}{TP+FN}+\frac{TN}{TN+FP}\right)
-```
-
-The confusion matrix is also important because a model can have apparently reasonable accuracy while favoring one class:
-
-```math
-\begin{bmatrix}
-TN & FP \\
-FN & TP
-\end{bmatrix}
-```
-
-For probabilistic models, the ROC curve summarizes the trade-off between true positive rate and false positive rate as the decision threshold changes:
-
-```math
-TPR = \frac{TP}{TP+FN},\quad FPR = \frac{FP}{FP+TN}
-```
-
-Precision-recall curves are also useful because they focus on the positive class:
-
-```math
-Precision = \frac{TP}{TP+FP},\quad Recall = \frac{TP}{TP+FN}
-```
-
-Because the project undersamples classes to balance the two labels, chance accuracy is approximately 0.5. However, the notebooks still use permutation or analytical chance estimates because small sample sizes, cross-validation design, and temporal grouping can move the practical null distribution away from a naive 50%.
-
-Undersampling is done per subject to avoid letting a naturally larger class dominate the loss or the decision boundary. If a subject has `n_0` trials in class 0 and `n_1` trials in class 1, the balanced number of retained trials per class is:
+Because the natural class distribution is uneven, trials are balanced within subject by undersampling the larger class:
 
 ```math
 n_{keep} = \min(n_0,n_1)
 ```
 
-This improves fairness between labels, but it discards data and increases variance. The epoch-grid notebooks explicitly study how decoding changes with the number of available balanced trials.
+This makes chance performance close to 0.5 and prevents class prevalence from dominating the models, but it also discards trials and increases variance. Subject selection therefore uses two practical criteria: enough trials in the minority class, usually IP, and sufficient condition separation according to Cohen's d. The thesis should explain this selection logic, but it does not need a long standalone treatment.
 
-### Logistic regression
+### Validation and chance testing
 
-Logistic regression is used as an interpretable baseline. Given feature vector `x`, the model estimates:
+Cross-validation is mainly relevant in the decoding chapter. The key thesis point is that EEG trials can share slow drifts, block effects, fatigue, impedance changes, or subject-specific patterns, so validation cannot be treated casually. The project uses temporal/grouped splitting where possible and keeps preprocessing inside folds to reduce leakage.
 
-```math
-p(y=1|x) = \sigma(w^\top x + b)
-```
-
-where:
-
-```math
-\sigma(a) = \frac{1}{1 + e^{-a}}
-```
-
-The model is trained by minimizing cross-entropy with L2 regularization:
-
-```math
-L(w,b) =
--\sum_i [y_i \log p_i + (1-y_i)\log(1-p_i)] + \lambda ||w||_2^2
-```
-
-The project uses `SafeLogisticRegressionCV`, a wrapper around scikit-learn logistic regression CV that adapts to small class counts. This matters because some subjects have few valid trials after filtering and balancing.
-
-The regularization strength is usually represented by `C` in scikit-learn, where larger `C` means weaker regularization:
-
-```math
-C \propto \frac{1}{\lambda}
-```
-
-For EEG, regularization is not a cosmetic detail. With few trials and many correlated features, an unregularized linear model can fit noise. L2 regularization shrinks weights smoothly, reducing variance while keeping all features available.
-
-### Cross-validation and temporal leakage
-
-EEG trials are not independent in the same way as shuffled images from a large dataset. Consecutive trials can share slow drifts, fatigue, impedance changes, attentional state, or block-level effects. A random train/test split can therefore overestimate performance by placing temporally adjacent trials into both training and test folds.
-
-The project implements grouped and chronological splitting in [src/br_analysis/experiments.py](src/br_analysis/experiments.py) and [src/br_analysis/torch_training.py](src/br_analysis/torch_training.py). The intent is:
-
-- Keep class proportions balanced across folds.
-- Keep nearby trials grouped when possible.
-- Reserve the latest portion of data as a stricter holdout/development exclusion.
-- For cohort-level models, avoid mixing subject-specific patterns in a way that would inflate performance.
-
-This is thesis-relevant because validation design is one of the main risks in EEG machine learning. A small difference above chance is only meaningful if leakage is controlled.
-
-For a fold `j`, the model is trained on `D_{train}^{(j)}` and evaluated on `D_{test}^{(j)}`:
-
-```math
-A_j = \frac{1}{|D_{test}^{(j)}|}\sum_{(x_i,y_i)\in D_{test}^{(j)}} I(f_{\theta^{(j)}}(x_i)=y_i)
-```
-
-The reported cross-validation score is:
-
-```math
-\bar{A}=\frac{1}{K}\sum_{j=1}^{K} A_j
-```
-
-The project's stronger design choice is not just using `K` folds, but controlling how examples enter folds. For within-subject data, ordered trial blocks reduce leakage from neighboring trials. For cohort-level data, subject-aware groups reduce the risk of learning subject identity rather than condition structure.
-
-### Permutation testing
-
-Several notebooks estimate empirical chance distributions by permuting labels:
-
-```math
-y^{(p)} = \pi_p(y)
-```
-
-The classifier is retrained on permuted labels, producing a null accuracy distribution. A practical one-sided permutation p-value can be written as:
+Some notebooks also use label permutation to estimate empirical chance distributions:
 
 ```math
 p = \frac{1 + \sum_{p=1}^{P} I(A_p \ge A_{real})}{P+1}
 ```
 
-The notebooks also compare real accuracy to the 95th percentile of the surrogate distribution (`chance_q95`). This is stricter than simply checking whether accuracy is above 0.5.
+This is useful because modest above-chance accuracies are only interpretable if compared with a reasonable null distribution. Standard metrics such as accuracy, balanced accuracy, confusion matrices, ROC, and PR curves are reporting tools rather than central thesis concepts.
 
-### Multiple comparisons and FDR
+### Statistical correction
 
-Topographic, temporal, and model-comparison analyses can involve many tests. The project uses ideas such as false discovery rate (FDR) correction and cluster-based permutation tests to reduce false positives.
-
-FDR controls the expected proportion of false discoveries among rejected hypotheses. The Benjamini-Hochberg procedure sorts p-values and finds a threshold:
-
-```math
-p_{(k)} \le \frac{k}{m}q
-```
-
-where `m` is the number of tests and `q` is the desired FDR level.
-
-This matters because EEG analysis often tests many channels, times, bands, and models. If 100 independent null hypotheses are tested at `p < 0.05`, roughly five false positives are expected by chance. FDR and cluster-based permutation testing are used to keep the thesis from turning noise into a story.
+False discovery rate correction appears in some comparison or visualization code, especially for multiple pairwise/model comparisons. However, unless a final thesis result depends on an FDR-significant finding, FDR should remain a short methodological note. The main statistical correction framework worth foregrounding is the cluster-based permutation analysis, because it directly supports the clustering chapter.
 
 ### Cluster-based permutation testing
 
-Notebook 10 uses spatiotemporal cluster-based permutation testing. Instead of testing each channel-time cell independently, adjacent significant cells are grouped into clusters. A cluster statistic, such as summed t-values, is compared to a permutation-based null distribution of maximum cluster statistics. This helps control family-wise error while respecting EEG's spatial and temporal structure.
+Cluster-based permutation testing is important enough to motivate its own thesis section or chapter. Instead of interpreting isolated channel-time samples, the method groups neighboring samples into spatiotemporal clusters and compares their cluster mass against a permutation distribution.
 
 The basic logic is:
 
@@ -366,220 +263,30 @@ The basic logic is:
 5. Permute labels many times and keep the maximum cluster mass per permutation.
 6. Assign corrected p-values to observed clusters.
 
-This is appropriate for EEG because effects are expected to occupy contiguous time windows and nearby electrodes rather than isolated single samples.
+This is appropriate for EEG because plausible effects should usually extend over neighboring electrodes and time samples. A cluster boundary should still not be interpreted as an exact neural onset, because time-frequency resolution and preprocessing choices limit temporal precision.
 
-A typical cell-wise statistic for a paired subject-level contrast is:
+### Classical decoding models
 
-```math
-t(c,t)=\frac{\bar{d}_{c,t}}{s_{d,c,t}/\sqrt{N}}
-```
+Logistic regression is used as a transparent baseline on compact theta/alpha features. It is useful precisely because it is simple: if a single-channel or small-ROI feature carries information, a regularized linear classifier should detect some of it.
 
-where `d` is the subject-level condition difference. A cluster mass can then be defined as:
+Riemannian covariance classification is the strongest classical family in the current project. Each trial is represented by a covariance matrix, stabilized with OAS shrinkage, projected into tangent space, and classified with shrinkage LDA. This is well suited to EEG because it preserves distributed spatial relationships between sensors and frequency-filtered networks.
 
-```math
-M(\mathcal{C})=\sum_{(c,t)\in\mathcal{C}} t(c,t)
-```
+The SVC clustering notebook adds a later classical model that uses compact cluster-restricted features from the exported theta/alpha windows. It should be described as an additional cluster-informed classifier rather than as a completely separate methodological pillar.
 
-The corrected cluster p-value compares the observed mass to the permutation distribution of maximum masses:
+### Deep learning and pretrained models
 
-```math
-p_{cluster}=\frac{1+\sum_{b=1}^{B}I(M^{max}_b \ge M_{obs})}{B+1}
-```
+The deep-learning models test whether more flexible architectures can learn useful representations from raw or lightly processed EEG:
 
-### Riemannian covariance classification
+- **EEGNet**: compact EEG-specific convolutional model, tested in agnostic and cluster-restricted variants.
+- **ST-GNN**: graph neural network using electrode geometry and temporal features.
+- **ST-EEGFormer**: transformer-style EEG model adapted with LoRA.
+- **LaBraM**: pretrained/foundation EEG model adapted with LoRA-style fine-tuning.
 
-The Riemannian model represents each trial by its covariance matrix:
-
-```math
-\Sigma_i = \frac{1}{T-1} X_i X_i^\top
-```
-
-The covariance estimator used in the notebooks is OAS shrinkage, which stabilizes covariance estimates when `T` and the number of channels are not large enough for a raw empirical covariance to be reliable:
-
-```math
-\hat{\Sigma}_{OAS}=(1-\rho)\hat{\Sigma}+\rho\frac{\mathrm{tr}(\hat{\Sigma})}{C}I
-```
-
-Covariance matrices are symmetric positive definite (SPD) when well estimated. They live on a curved manifold rather than ordinary Euclidean vector space. Distances on this manifold can be measured with the affine-invariant Riemannian metric:
-
-```math
-d_R(A,B)=\left\|\log\left(A^{-1/2}BA^{-1/2}\right)\right\|_F
-```
-
-Riemannian methods classify them by projecting covariance matrices to the tangent space around a reference mean covariance:
-
-```math
-S_i = \log_{\bar{\Sigma}}(\Sigma_i)
-```
-
-More explicitly:
-
-```math
-S_i = \bar{\Sigma}^{1/2}\log\left(\bar{\Sigma}^{-1/2}\Sigma_i\bar{\Sigma}^{-1/2}\right)\bar{\Sigma}^{1/2}
-```
-
-The tangent representation can then be vectorized and passed into a conventional classifier such as LDA. In this project, [src/br_analysis/models.py](src/br_analysis/models.py) uses pyRiemann `Covariances(estimator="oas")`, `TangentSpace(metric="riemann")`, and shrinkage LDA.
-
-This approach is a strong fit for EEG because covariance captures spatial relationships between electrodes and frequency-filtered networks. In the project results, Riemannian covariance features are the strongest or most stable model family.
-
-### LDA
-
-Linear Discriminant Analysis assumes each class is approximately Gaussian with shared covariance. The decision rule is linear:
-
-```math
-\delta_k(x) = x^\top \Sigma^{-1}\mu_k - \frac{1}{2}\mu_k^\top\Sigma^{-1}\mu_k + \log \pi_k
-```
-
-The implementation uses shrinkage to stabilize covariance estimates when samples are limited.
-
-### Deep learning
-
-Deep learning models learn hierarchical representations directly from EEG arrays or graph features. The project uses cross-entropy loss:
-
-```math
-L = -\sum_i \sum_k y_{ik}\log p_{ik}
-```
-
-Neural models output logits `z`, which are converted to class probabilities by softmax:
-
-```math
-p_k=\frac{e^{z_k}}{\sum_j e^{z_j}}
-```
-
-For imbalanced fold-level batches, class-weighted cross-entropy can be used:
-
-```math
-L = -\sum_i \alpha_{y_i}\log p_{i,y_i}
-```
-
-The main risk is overfitting: the EEG dataset is relatively small, noisy, and subject-specific. Therefore, the project uses early stopping, class weights, dropout, weight decay, standardized inputs, and a two-stage refit strategy in several notebooks.
-
-Weight decay penalizes large weights:
-
-```math
-L_{total}=L_{CE}+\lambda ||\theta||_2^2
-```
-
-Dropout randomly masks hidden activations during training:
-
-```math
-\tilde{h}=m\odot h,\quad m_j\sim Bernoulli(1-p)
-```
-
-Early stopping selects the epoch with best validation loss or accuracy. Some notebooks then refit the model on the full training fold for exactly the selected number of epochs, which uses validation information to choose training duration but not to train final weights directly.
-
-### EEGNet
-
-EEGNet is a compact convolutional architecture designed for EEG. In [src/br_analysis/torch_models.py](src/br_analysis/torch_models.py), it applies:
-
-- Temporal convolution to learn frequency-sensitive filters.
-- Depthwise spatial convolution to learn channel combinations.
-- Separable convolution to combine spatiotemporal features efficiently.
-- Pooling and dropout before a linear classifier.
-
-The project evaluates two variants:
-
-- **Agnostic EEGNet**: all 60 channels, broad 1-40 Hz filtering, full epoch.
-- **Clustering EEGNet**: data-driven theta/alpha channel clusters and selected time windows from notebook 10.
-
-A temporal convolutional filter computes:
-
-```math
-y_{f,c,t}=\sum_{\tau=0}^{K-1} w_{f,\tau}x_{c,t-\tau}
-```
-
-Depthwise spatial convolution then learns a spatial filter separately for each temporal feature map:
-
-```math
-s_{f,d,t}=\sum_{c=1}^{C} a_{f,d,c}y_{f,c,t}
-```
-
-This is why EEGNet is attractive for EEG: it explicitly separates temporal-frequency filtering from spatial channel mixing.
-
-### ST-GNN
-
-The spatio-temporal graph neural network represents electrodes as graph nodes. Edges are based on electrode distances. Each trial is converted into windowed node features, including theta and alpha differential entropy/log-power estimates. The graph convolution uses Chebyshev polynomial filters:
-
-```math
-g_\theta *_G x \approx \sum_{k=0}^{K-1} \theta_k T_k(\tilde{L})x
-```
-
-where `T_k` are Chebyshev polynomials and `\tilde{L}` is a scaled graph Laplacian. This model is biologically motivated because EEG electrodes have a spatial arrangement and nearby sensors may carry related activity.
-
-The adjacency matrix is based on electrode distance. A common form, also reflected in the project code, is:
-
-```math
-A_{ij} =
-\begin{cases}
-\exp(-d_{ij}^2/\sigma^2), & d_{ij}<r \\
-0, & otherwise
-\end{cases}
-```
-
-The normalized graph Laplacian is:
-
-```math
-L=I-D^{-1/2}AD^{-1/2}
-```
-
-The graph view matters because EEG is not an unordered vector of channels: electrode geometry encodes useful prior structure.
-
-### Transformers and LoRA
-
-ST-EEGFormer and LaBraM use transformer-style attention. Self-attention computes:
-
-```math
-Attention(Q,K,V) = softmax\left(\frac{QK^\top}{\sqrt{d}}\right)V
-```
-
-This allows the model to learn interactions across tokens, which may represent channels, temporal patches, or both.
-
-Because pretrained models are large and the dataset is small, the project uses Low-Rank Adaptation (LoRA) for parameter-efficient fine-tuning:
-
-```math
-W' = W + \Delta W,\quad \Delta W = BA,\quad rank(\Delta W) = r
-```
-
-Only small low-rank adapter matrices and classification heads are trained while much of the pretrained backbone remains frozen. This reduces trainable parameters and overfitting risk.
-
-If `W \in \mathbb{R}^{d_{out}\times d_{in}}`, LoRA uses:
-
-```math
-A\in\mathbb{R}^{r\times d_{in}},\quad B\in\mathbb{R}^{d_{out}\times r},\quad r \ll \min(d_{in},d_{out})
-```
-
-so the number of trainable adapter parameters is:
-
-```math
-r(d_{in}+d_{out})
-```
-
-instead of:
-
-```math
-d_{in}d_{out}
-```
-
-This is the main reason LoRA is plausible for a small EEG dataset: it adapts a pretrained representation without updating every backbone parameter.
+These models require careful interpretation because the dataset is small, noisy, and subject-specific. Their role in the thesis is not simply to "beat" classical methods, but to test whether model complexity and pretraining help under realistic EEG constraints.
 
 ### Explainability and attribution
 
-The explainability notebooks use saliency and SHAP-style gradient explanations to ask which inputs influence a trained neural model. A simple saliency map is the absolute gradient of the class score with respect to the input:
-
-```math
-S_{c,t}=\left|\frac{\partial f_k(X)}{\partial X_{c,t}}\right|
-```
-
-Large values indicate that a small perturbation at channel `c`, time `t` would strongly change the class score. This is not the same as proving a neural source is causally involved, but it can show whether a model is relying on plausible time-channel regions.
-
-For perturbation-style attribution, the conceptual Shapley value for feature `j` is:
-
-```math
-\phi_j=\sum_{S\subseteq F\setminus\{j\}}\frac{|S|!(|F|-|S|-1)!}{|F|!}\left[f(S\cup\{j\})-f(S)\right]
-```
-
-Exact Shapley values are too expensive for high-dimensional EEG, so practical SHAP implementations approximate them. In the thesis, these maps should be treated as model-behavior diagnostics, not direct neuroscience proof.
-
+Saliency and SHAP-style analyses are used as model-behavior diagnostics. They ask whether trained models rely on plausible channels, time windows, and frequency-related structure. They should not be presented as direct source localization or causal neuroscience evidence.
 ## Repository structure
 
 ```text
@@ -616,333 +323,95 @@ The script [src/scripts/br.py](src/scripts/br.py) contains Manim animations for 
 
 ## Notebook pipeline
 
-The notebooks form a logical workflow. Some notebooks are paired: one version for C vs IP and another for IM vs IP. The paired notebooks are not repeated in full here; the important differences are the task labels, selected subjects, cluster definitions, and results.
+The notebooks form a workflow from exploration to model comparison. The thesis should describe this pipeline by analysis role, not by giving every notebook equal space.
 
-### 01_exploració_dades.ipynb
+### Dataset exploration and subject selection
 
-This is the exploratory data analysis notebook and should be treated as the starting point of the thesis methodology.
+[01_exploració_dades.ipynb](src/notebooks/01_exploració_dades.ipynb) loads the EEG epochs and checks the behavioral and signal structure of the dataset. It documents the natural imbalance between C, IP, and IM trials; subject-level perceptual biases; eye/color dominance; usable trial counts; ERP/time-frequency summaries; and possible fatigue or session-progress effects.
 
-It loads the Google Drive EEG epochs and examines the behavioral and EEG structure of the dataset. Stored outputs indicate 47 included subjects in the broad exploration and global class counts of approximately:
+The most thesis-relevant output is the subject-selection logic. Subjects are not selected only by availability: selection considers the number of minority-class trials and an effect-size criterion based on Cohen's d. This should be explained generally, with detailed tables moved to an appendix if needed.
 
-- Congruent: 8471 trials, 37.1%.
-- Incongruent total: 14367 trials, 62.9%.
-- Incongruent Pure: 4689 trials, 20.5% of total.
-- Incongruent Mixed: 9678 trials.
+### Representation search and exploratory experiments
 
-The notebook studies subject-level dominance:
+[02_experiments.ipynb](src/notebooks/02_experiments.ipynb) is a broad representational testing framework rather than one final model. It covers preprocessing/normalization ablations, spatial-temporal-spectral representation diagnostics, classical ML baselines, CSP/FBCSP/Riemannian comparisons, PLV/coherence connectivity features, EEGNet and deep-learning ablations, transfer learning, joint configuration search, controlled contribution ablations, generalization checks, and subject-identity controls.
 
-- IM is much more frequent than IP globally, with an IM ratio around 0.674.
-- Left-eye coherent pure percepts are more frequent than right-eye coherent pure percepts, around 0.596 left-eye proportion.
-- Red responses are also more frequent than green in the stored dominance summaries.
+For the thesis, this notebook should be used to explain how the project narrowed down the analysis space. Important takeaways include:
 
-This matters because a classifier could exploit behavioral or temporal biases if the evaluation design is careless. The notebook therefore motivates class balancing, subject selection, and temporal/grouped validation.
+- preprocessing and representation choices matter, but they should not dominate the thesis narrative;
+- Riemannian/covariance representations repeatedly appear strong;
+- PLV/connectivity features are part of the work but are not a major final result if they remain close to chance;
+- subject identity is easy for EEG models to learn and should be discussed as a control and ethics issue.
 
-The notebook also computes real Cohen's d estimates for theta at FCz and alpha at Oz, explores subject eligibility, and exports selected-subject tables:
+### Simple targeted decoding
 
-- `subjectes_seleccionats.csv` for C vs IP.
-- `subjectes_seleccionats_im_vs_ip.csv` for IM vs IP.
+[03_chance_level_c_ip.ipynb](src/notebooks/03_chance_level_c_ip.ipynb) and [07_chance_level_im_ip.ipynb](src/notebooks/07_chance_level_im_ip.ipynb) test simple theta/alpha logistic-regression baselines. They use targeted features such as FCz-theta and Oz-alpha, epoch grids, time-window maps, and permutation chance estimates.
 
-Finally, it reproduces thesis-relevant EEG summaries: ERP checks, theta time courses, alpha suppression, differential time-frequency maps, and fatigue/session-progress analyses. The fatigue section finds only a small error increase over time, not a dramatic collapse of data quality.
+These notebooks are useful because they establish transparent baselines. They show that isolated features carry only modest information, with alpha generally more useful than single-channel theta in the stored outputs. The detailed grid counts can be summarized in the results chapter and placed in an appendix if necessary.
 
-### 02_experiments.ipynb
+### Riemannian covariance decoding
 
-This notebook is a broad hierarchical representational testing framework. It is less a single final model and more an experimental design notebook for asking what type of representation is useful.
+[04_riemann_c_ip.ipynb](src/notebooks/04_riemann_c_ip.ipynb) and [08_riemann_im_ip.ipynb](src/notebooks/08_riemann_im_ip.ipynb) implement covariance-based decoding with Riemannian tangent-space projection and shrinkage LDA. This is one of the most important model families because it preserves multichannel covariance structure instead of reducing trials to one or two scalar power features.
 
-It contains 11 experiments:
+The thesis should connect this method to the EEG interpretation: discriminative information may be distributed across channels and frequency networks rather than located in a single electrode.
 
-1. **Preprocessing and normalization ablation**: compares no normalization, trial-wise z-scoring, global fold z-scoring, subject-level scaling, standard scaling, and robust scaling. Stored outputs show only modest differences, with robust scaling slightly best in one C vs IP run.
-2. **Representation diagnostics**: tests spatial, temporal, and spectral choices. Outputs suggest C vs IP is more decodable than IM vs IP in several settings, and that the conflict-related time window and broadband/theta-alpha representations are worth exploring.
-3. **Classical ML branch**: compares logistic regression, LDA, random forest, XGBoost, and LightGBM. Logistic regression is the strongest classical vector-feature baseline in the stored output.
-4. **Classical spatial baselines**: compares CSP, FBCSP, and Riemannian covariance. Riemannian covariance + LDA is best among these in the stored C vs IP output.
-5. **Connectivity and network representations**: evaluates theta/alpha phase-locking value features. Stored outputs are close to chance, suggesting simple PLV features are not strongly informative in this setup.
-6. **Focused deep learning branch**: evaluates EEGNet variants and deep-learning preprocessing choices.
-7. **Pretrained models and transfer learning**: tests ST-EEGFormer and LaBraM-style pretrained backbones with adaptation.
-8. **Cohort-level joint search**: uses Optuna-style search to tune shared preprocessing/model configurations.
-9. **Deep-learning cohort-level tuning**: tunes model-specific deep learning choices under subject-independent or cohort-level settings.
-10. **Controlled contribution ablation**: isolates the contribution of preprocessing, spatial selection, spectral selection, time windows, and model family.
-11. **Generalization and control tests**: checks whether models learn condition-relevant structure rather than artifacts or subject identity.
+### Experiment-guided configurations
 
-The notebook is important for the thesis because it gives the project a research-design logic: start from simple hypotheses, test representation families, then escalate to more complex models only when justified.
+[05_experiment_guided_config_c_ip.ipynb](src/notebooks/05_experiment_guided_config_c_ip.ipynb) and [09_experiment_guided_config_im_ip.ipynb](src/notebooks/09_experiment_guided_config_im_ip.ipynb) apply configurations selected by the broader experiment-search notebook and evaluate them with development CV and a reserved holdout.
 
-The most up-to-date cached outputs from this notebook add several thesis-relevant points:
+These notebooks are useful for explaining how the project moved from search to more constrained evaluation. The thesis should be careful to describe configuration search as exploratory/model-selection evidence, not as independent confirmation by itself.
 
-- Experiment 8 selects **Riemann + trial-wise z-scoring + all channels + broadband + full epoch** for C vs IP, and **classical ML + robust scaling + ROI + alpha + full epoch + Welch PSD** for IM vs IP.
-- Experiment 9's deep-learning tuning reports EEGNet as the strongest tuned neural model among the tested neural/foundation options, with LaBraM and ST-EEGFormer behind it in the cached summary.
-- Experiment 10's controlled ablation indicates that band and spatial setting are especially important for C vs IP, while IM vs IP depends more broadly on spatial setting, band, model family, and time scope.
-- Experiment 11 includes generalization and subject-identity controls. The subject-identification control is extremely high, which is not surprising for within-cohort held-out trials and reinforces a key warning: EEG models can learn subject fingerprints very easily. This makes subject-aware validation and cautious interpretation essential.
+### Visualization and interpretive figures
 
-### 03_chance_level_c_ip.ipynb and 07_chance_level_im_ip.ipynb
+[06_visualitzacions.ipynb](src/notebooks/06_visualitzacions.ipynb) collects figure-oriented analyses: searchlight maps, subject-selection views, topographies, temporal maps, alpha-vs-theta comparisons, ERP images, Riemannian projections, connectivity graphs, and other exploratory visualizations.
 
-These notebooks evaluate simple logistic regression decoding using two targeted band/channel features:
+This notebook is mainly a source of thesis figures and interpretive support. It should not be described as a separate experimental result unless a specific figure is used to support a claim.
 
-- FCz-theta.
-- Oz-alpha.
+### Clustering
 
-The method is intentionally simple: filter the signal to the selected band, extract mean Hilbert envelope or power-like features over the analysis window, standardize inside the modeling pipeline, and classify with L2 logistic regression. The notebooks run an epoch-grid analysis to see how performance changes as the number of trials increases, and they compare real accuracy to label-permutation chance distributions.
+[10_clustering.ipynb](src/notebooks/10_clustering.ipynb) deserves substantial thesis space. It performs data-driven spatiotemporal cluster analysis for both C vs IP and IM vs IP in theta and alpha bands, compares paper-inspired ROIs with data-driven clusters, and exports cluster definitions for later focused models.
 
-For **C vs IP**, stored outputs show:
-
-- 24 unique subjects.
-- Global real mean accuracy around 0.5182 in the epoch grid.
-- 22/284 combinations above the 95th percentile of chance.
-- FCz-theta: 5/142 combinations above q95, average delta accuracy around 0.0071, maximum accuracy 0.6068.
-- Oz-alpha: 17/142 combinations above q95, average delta accuracy around 0.0312, maximum accuracy 0.6437.
-- Cohort CV averages around 0.5020 for FCz-theta and 0.5333 for Oz-alpha.
-
-This suggests that single-channel alpha carries more decodable signal than single-channel theta in this simple setup, although the overall effect is modest.
-
-For **IM vs IP**, stored outputs show:
-
-- 29 unique subjects.
-- Global real mean accuracy around 0.5020 in the epoch grid.
-- 6/324 combinations above q95.
-- FCz-theta: 1/162 combinations above q95, average delta accuracy around -0.0014.
-- Oz-alpha: 5/162 combinations above q95, average delta accuracy around 0.0061.
-- Cohort CV averages around 0.4945 for FCz-theta and 0.5165 for Oz-alpha.
-
-This supports the interpretation that IM vs IP is harder to decode with simple targeted features than C vs IP.
-
-### 04_riemann_c_ip.ipynb and 08_riemann_im_ip.ipynb
-
-These notebooks implement the strongest classical feature family: covariance matrices, Riemannian tangent-space projection, and shrinkage LDA.
-
-Instead of reducing each trial to one band-envelope scalar, the Riemannian pipeline keeps multichannel covariance structure. It filters theta and alpha channel clusters separately, concatenates them as a multi-network feature space, estimates covariance matrices using OAS shrinkage, maps SPD matrices to tangent space, and trains LDA.
-
-For **C vs IP**, stored outputs show:
-
-- 24 subjects.
-- Global real mean accuracy around 0.5452 in the epoch grid.
-- 27/142 combinations above q95.
-- Average delta accuracy around 0.0449.
-- Maximum subject/setting accuracy around 0.7178.
-- Cohort CV fold summary around 0.56 average in the cross-model comparison.
-
-For **IM vs IP**, stored outputs show:
-
-- 29 subjects.
-- Global real mean accuracy around 0.5032.
-- 6/162 combinations above q95.
-- Average delta accuracy around 0.0203.
-- Maximum accuracy around 0.6960.
-- Cohort CV average around 0.5175.
-
-This is one of the clearest methodological results: covariance structure across theta and alpha networks is more informative than isolated single-channel features, especially for C vs IP.
-
-### 05_experiment_guided_config_c_ip.ipynb and 09_experiment_guided_config_im_ip.ipynb
-
-These notebooks apply the experiment-guided configurations selected by Experiment 8. They do not compare alternatives. They report development CV separately from the reserved final holdout test.
-
-The best-configuration logic is important because it separates **model search** from **final evaluation**. In Experiment 8, many choices are explored jointly:
-
-- normalization,
-- spatial channel set,
-- frequency band,
-- time scope,
-- model family,
-- model-specific hyperparameters.
-
-The cached Experiment 8 summary currently reports:
-
-```text
-C vs IP:
-  best family: Riemann
-  normalization: trial_zscore
-  spatial setting: All
-  band: Broadband
-  time scope: full
-  objective score: 0.569633
-  mean accuracy: 0.593605
-
-IM vs IP:
-  best family: Classical ML
-  normalization: robust_scaler
-  spatial setting: ROI
-  band: Alpha
-  time scope: full
-  features: Welch PSD
-  objective score: 0.558466
-  mean accuracy: 0.580945
-```
-
-The same notebook includes a controlled ablation analysis. For C vs IP, replacing the selected band and spatial setting causes the largest drops, suggesting that spectral and spatial choices are not arbitrary. For IM vs IP, replacing the spatial setting, band, model family, and time scope all produces meaningful drops in the cached ablation, suggesting that the best IM vs IP configuration is more dependent on the full combination of preprocessing choices.
-
-This should be written carefully in the thesis: Experiment 8 is a configuration-search result, not a final independent proof. Its value is to guide the pre-specified experiment-guided configuration notebooks and to show which preprocessing/model components appear important.
-
-### 06_visualitzacions.ipynb
-
-This notebook is a visualization laboratory. It creates multiple interpretive views rather than a single classifier:
-
-- Searchlight spatiotemporal dynamics.
-- Subject selection checks.
-- Band-specific searchlight maps.
-- Statistical heatmaps.
-- Sequential topomaps and GIFs.
-- Alpha-vs-theta dominance plots.
-- Temporal generalization matrix.
-- Latency maps.
-- Distance-dependent electrode correlations.
-- Classification spectrograms.
-- ERP images.
-- Riemannian tangent-space PCA projection.
-- Connectivity graphs.
-- 3D cortical/source-location style views.
-
-For the thesis, this notebook helps convert numeric model performance into interpretable figures. Its value is explanatory: it can help show where, when, and how decoding signal appears, and whether it resembles the hypothesized fronto-medial theta and parieto-occipital alpha mechanisms.
-
-### 10_clustering.ipynb
-
-This notebook performs data-driven spatiotemporal clustering. It identifies channel-time regions where condition differences are statistically structured and then exports chosen clusters to JSON for later focused EEGNet and visualization notebooks.
-
-The exported cluster definitions in the stored output are:
+The exported clusters in the stored output are:
 
 ```json
 {
   "c_vs_ip": {
-    "theta": {
-      "channels": ["Fz", "FCz"],
-      "tmin": 1.171875,
-      "tmax": 1.2421875
-    },
-    "alpha": {
-      "channels": ["FC3", "FC1", "FC2", "C3", "C1", "Cz", "C2", "CP3", "CP1", "CPz", "CP2", "CP4", "P5", "P3", "P1", "Pz", "P2", "P4", "P6", "P8", "PO3", "POz", "PO4", "PO8", "O1", "Oz", "O2"],
-      "tmin": 0.375,
-      "tmax": 1.2421875
-    }
+    "theta": {"channels": ["Fz", "FCz"], "tmin": 1.171875, "tmax": 1.2421875},
+    "alpha": {"channels": ["FC3", "FC1", "FC2", "C3", "C1", "Cz", "C2", "CP3", "CP1", "CPz", "CP2", "CP4", "P5", "P3", "P1", "Pz", "P2", "P4", "P6", "P8", "PO3", "POz", "PO4", "PO8", "O1", "Oz", "O2"], "tmin": 0.375, "tmax": 1.2421875}
   },
   "im_vs_ip": {
-    "theta": {
-      "channels": ["Fz", "FCz", "Cz"],
-      "tmin": 1.1953125,
-      "tmax": 1.2421875
-    },
-    "alpha": {
-      "channels": ["TP7", "CP5", "CP3", "CP1", "P7", "P5", "P3"],
-      "tmin": 0.2578125,
-      "tmax": 0.421875
-    }
+    "theta": {"channels": ["Fz", "FCz", "Cz"], "tmin": 1.1953125, "tmax": 1.2421875},
+    "alpha": {"channels": ["TP7", "CP5", "CP3", "CP1", "P7", "P5", "P3"], "tmin": 0.2578125, "tmax": 0.421875}
   }
 }
 ```
 
-The notebook also compares paper-replication ROIs with data-driven clusters. In the stored outputs:
+Stored outputs suggest that C vs IP alpha effects are among the more stable sensor-level findings, while IM vs IP clusters are less stable and more sensitive to ROI/time-frequency choices. This should be framed carefully: clustering is central for interpretation and feature restriction, but cluster-selected regions can introduce circularity if reused for final decoding without separation between selection and evaluation.
 
-- Exact paper-replication C vs IP theta does not survive as a significant cluster in the displayed summary, although its minimum p-value is close (`min p = 0.0410` before the stricter cluster conclusion shown by the notebook).
-- Exact paper-replication C vs IP alpha shows a significant window from about 440 ms to 1380 ms (`p = 0.0003`).
-- Exact paper-replication IM vs IP theta shows a significant window from about 540 ms to 880 ms (`p = 0.0267`).
-- Exact paper-replication IM vs IP alpha does not show a significant cluster in the stored summary.
-- Data-driven C vs IP theta shows a significant window from about 937.5 ms to 1382.8 ms (`p = 0.0261`).
-- Data-driven C vs IP alpha shows a significant window from about 304.7 ms to 1382.8 ms (`p = 0.0009`).
-- Data-driven IM vs IP theta and alpha do not show significant clusters in the stored custom-cluster timecourse summaries.
-- Global alpha across all electrodes shows a significant C vs IP window from about 580 ms to 1380 ms (`p = 0.0044`), while global broadband summaries are not significant in the stored output.
+### Deep learning and pretrained models
 
-This pattern suggests that alpha suppression/engagement is one of the more stable sensor-level signatures for the main C vs IP contrast, while IM vs IP remains less stable and more sensitive to the chosen ROI and time-frequency representation.
+[11_EEGNet_c_ip.ipynb](src/notebooks/11_EEGNet_c_ip.ipynb), [17_EEGNet_im_ip.ipynb](src/notebooks/17_EEGNet_im_ip.ipynb), [12_ST-GNN_c_ip.ipynb](src/notebooks/12_ST-GNN_c_ip.ipynb), [18_ST-GNN_im_ip.ipynb](src/notebooks/18_ST-GNN_im_ip.ipynb), [13_ST-EEGFormer_c_ip.ipynb](src/notebooks/13_ST-EEGFormer_c_ip.ipynb), [19_ST-EEGFormer_im_ip.ipynb](src/notebooks/19_ST-EEGFormer_im_ip.ipynb), [14_LaBraM_c_ip.ipynb](src/notebooks/14_LaBraM_c_ip.ipynb), and [20_LaBraM_im_ip.ipynb](src/notebooks/20_LaBraM_im_ip.ipynb) evaluate neural and pretrained EEG models.
 
-### 11_EEGNet_c_ip.ipynb and 17_EEGNet_im_ip.ipynb
+The most important thesis-level point is that deep/foundation models do not automatically outperform classical methods in this dataset. EEGNet agnostic is a useful neural baseline; cluster-restricted EEGNet does not clearly improve cohort performance in the stored outputs; ST-GNN, ST-EEGFormer, and LaBraM are useful exploratory comparisons but require cautious reporting, especially where cached IM vs IP predictions are incomplete.
 
-These notebooks evaluate EEGNet with two variants:
+### Cross-model comparison
 
-- **Agnostic**: all 60 channels, broad filtering, full epoch.
-- **Clustering**: theta/alpha channels and time windows from notebook 10.
+[15_cross_model_comparison_c_ip.ipynb](src/notebooks/15_cross_model_comparison_c_ip.ipynb) and [21_cross_model_comparison_im_ip.ipynb](src/notebooks/21_cross_model_comparison_im_ip.ipynb) collect the main benchmark comparisons.
 
-For **C vs IP**, stored outputs show:
+For C vs IP, the stored comparison ranks Riemannian covariance highest, followed by LR-alpha and EEGNet agnostic, with larger neural/foundation models not clearly improving performance. For IM vs IP, the stored comparison is more limited because some expected deep-model prediction caches were missing, but Riemannian covariance again appears strongest among the available models.
 
-- 24 subjects.
-- Agnostic EEGNet mean accuracy around 0.534.
-- Clustering EEGNet mean accuracy around 0.502-0.505 depending on the summary.
-- The paired cohort comparison favors the agnostic model in the stored output (`p = 0.0044` t-test, `p = 0.0035` Wilcoxon).
+Pairwise tests and FDR-corrected heatmaps can be mentioned if used in final figures, but they do not need a long conceptual section unless they drive a thesis conclusion.
 
-This is interesting because the data-driven cluster restriction does not improve EEGNet in the cached C vs IP results. A likely interpretation is that the focused cluster is useful for interpretable classical analysis, but the neural network benefits from broader context or suffers from reduced input diversity when too aggressively constrained.
+### SVC clustering
 
-For **IM vs IP**, stored outputs show:
+[23_SVC_clustering_c_ip_im_ip.ipynb](src/notebooks/23_SVC_clustering_c_ip_im_ip.ipynb) is not reflected in older versions of this README. It trains an SVC model on compact features tied to the exported cluster windows for both C vs IP and IM vs IP, writes prediction caches, and integrates with the later explainability/comparison utilities.
 
-- 29 subjects.
-- Both agnostic and clustering EEGNet are close to chance at cohort level.
-- Average combined-fold accuracy is around 0.513 for agnostic and 0.511 for clustering.
-- The paired statistical comparison does not show a meaningful cohort difference (`p = 0.8874` t-test, `p = 0.9274` Wilcoxon).
+This notebook belongs with the clustering and classical decoding story: it asks whether cluster-restricted theta/alpha summaries can support a classifier more flexibly than logistic regression while staying more interpretable than the deep models.
 
-The P057 single-subject result can look better for clustering in IM vs IP, but the cohort-level result does not support a general improvement.
+### Explainability
 
-### 12_ST-GNN_c_ip.ipynb and 18_ST-GNN_im_ip.ipynb
+[16_explainability_c_ip.ipynb](src/notebooks/16_explainability_c_ip.ipynb), [22_explainability_im_ip.ipynb](src/notebooks/22_explainability_im_ip.ipynb), and [src/br_analysis/explainability.py](src/br_analysis/explainability.py) centralize attribution and model-behavior summaries across deep and cluster-informed models.
 
-These notebooks evaluate a spatio-temporal graph neural network. The model builds graph features from all 60 electrodes, using theta/alpha windowed features and a distance-based electrode adjacency matrix. A Chebyshev graph convolution learns spatial structure, and temporal convolution learns changes across time windows.
-
-For C vs IP, the stored P057 detailed run gives an average CV accuracy around 0.505 with a strong class imbalance in recall: high recall for Congruent but low recall for Incongruent Pure. In the cross-model comparison, ST-GNN has mean accuracy around 0.515.
-
-For IM vs IP, the stored output shown in the notebook appears to reuse labels in the printed classification report, so it should be treated cautiously. The cross-model IM vs IP comparison did not find cached ST-GNN predictions at the time of the stored output, so the most reliable cohort-level IM vs IP comparison currently comes from LR and Riemannian models.
-
-### 13_ST-EEGFormer_c_ip.ipynb and 19_ST-EEGFormer_im_ip.ipynb
-
-ST-EEGFormer is a transformer-style architecture adapted to EEG. The project aligns the 60 recorded channels to the larger channel layout expected by the pretrained model and uses LoRA adapters for fine-tuning.
-
-For C vs IP, stored outputs show:
-
-- Fold accuracies around 0.50-0.54.
-- Average CV accuracy around 0.5179.
-- Subject P057 has a better single-subject classification report, around 0.61 accuracy.
-
-This suggests that pretrained transformer features may help some subjects but did not beat Riemannian or EEGNet agnostic methods at the cohort level in the cached results.
-
-For IM vs IP, the current stored output is sparse: it shows that cached ST-EEGFormer cohort metrics are being loaded, but the cross-model IM vs IP notebook still does not include ST-EEGFormer because the expected prediction cache is not present. The thesis should therefore avoid treating ST-EEGFormer IM vs IP as a final benchmark until the notebook is rerun and its predictions are exported consistently.
-
-### 14_LaBraM_c_ip.ipynb and 20_LaBraM_im_ip.ipynb
-
-LaBraM is a large pretrained EEG foundation model. The project pads or adapts the trial representation, loads the pretrained checkpoint, and fine-tunes with LoRA-style adapters and a classifier head.
-
-For C vs IP, stored outputs show:
-
-- Average CV accuracy around 0.4965.
-- Subject P057 accuracy around 0.54.
-- In the cross-model ranking, LaBraM is last among the included C vs IP models.
-
-This does not mean LaBraM is generally bad; it means that in this small, specific, onset-BR decoding setting, the chosen adaptation and data volume did not produce a clear benefit over classical methods.
-
-For IM vs IP, the current LaBraM notebook structure is present but the stored output does not provide enough cohort-level evidence to include it in the final benchmark. The IM vs IP cross-model notebook still does not include LaBraM cached predictions.
-
-### 15_cross_model_comparison_c_ip.ipynb and 21_cross_model_comparison_im_ip.ipynb
-
-These are the main benchmark notebooks.
-
-For **C vs IP**, notebook 15 merges 24 subjects and 8 model configurations:
-
-```text
-Riemann:          mean accuracy 0.5659, std 0.0618
-LR_alpha:         mean accuracy 0.5447, std 0.0452
-EEGNet_Agnostic:  mean accuracy 0.5338, std 0.0380
-ST_EEGFormer:     mean accuracy 0.5178, std 0.0411
-ST_GNN:           mean accuracy 0.5150, std 0.0457
-LR_theta:         mean accuracy 0.5126, std 0.0433
-EEGNet_Clustering:mean accuracy 0.5046, std 0.0469
-LaBraM:           mean accuracy 0.4966, std 0.0300
-```
-
-The ranking is the strongest quantitative summary currently in the repository. It supports three thesis-level conclusions:
-
-1. The C vs IP contrast contains weak but measurable information.
-2. Riemannian covariance features are the most effective model family in the current implementation.
-3. More complex deep/foundation models do not automatically improve performance on small EEG datasets.
-
-For **IM vs IP**, notebook 21 currently merges 29 subjects and 3 model configurations because the expected deep-model prediction caches were not found:
-
-```text
-Riemann:  mean accuracy 0.5322, std 0.0466
-LR_alpha: mean accuracy 0.5083, std 0.0516
-LR_theta: mean accuracy 0.5037, std 0.0401
-```
-
-The IM vs IP ranking is therefore more limited. It suggests that Riemannian covariance again performs best, but the effect is smaller than for C vs IP.
-
-### 16_explainability_c_ip.ipynb and 22_explainability_im_ip.ipynb
-
-These notebooks centralize interpretability and explainability for the deep models. They are designed to compare saliency mapping and SHAP-style gradient explanations across models.
-
-Their thesis role is to connect model predictions back to neuroscience:
-
-- Do important time windows overlap with stimulus presentation and conflict-resolution intervals?
-- Do important channels overlap with fronto-medial theta and parieto-occipital alpha regions?
-- Are deep models using plausible EEG structure or unstable artifacts?
-
-The stored outputs in these notebooks are sparse, so they should be treated more as interpretability infrastructure than as final result notebooks unless rerun with the final saved models.
-
+Their thesis role is supporting rather than primary: they help ask whether models rely on plausible channels and time windows, but sparse or incomplete stored outputs should be described as interpretability infrastructure unless rerun and finalized.
 ## Main results and interpretation
 
 ### Behavioral and dataset structure
@@ -954,7 +423,7 @@ The selected cohorts used by the main decoding notebooks are:
 - 24 subjects for C vs IP.
 - 29 subjects for IM vs IP.
 
-### C vs IP is the more robust contrast
+### C vs IP is empirically more robust
 
 Across notebooks, C vs IP tends to produce stronger decoding than IM vs IP. This fits the scientific design: C vs IP compares no-conflict pure perception with conflict-resolved pure perception. The perceptual report is similar, but the physical and neural conflict context differs.
 
@@ -1008,14 +477,9 @@ Because performance is modest, the thesis should not argue only from accuracy. I
 
 The strongest thesis argument is therefore not "the model classifies BR perfectly", but rather: "carefully validated decoding reveals weak but structured EEG information related to binocular-rivalry conflict, and covariance-based representations capture this structure better than isolated band-power or large neural models in the current setting."
 
-### Subject identity is a strong control signal
+### Subject identity as an ethics/control issue
 
-Experiment 11's subject-identification control reaches extremely high accuracy in the cached output. This does not mean the condition classifiers are invalid, but it is a warning that EEG contains stable person-specific structure. For thesis interpretation, this means:
-
-- within-subject decoding answers whether condition information is present for a subject;
-- cohort decoding can mix condition information with subject-level structure if validation is not careful;
-- LOSO and cross-condition tests are stricter tests of generalization;
-- subject identification should be reported as a control, not as a target result.
+Experiment 11's subject-identification control reaches extremely high accuracy in the cached output. This is not a target result for the main decoding story, but it is important for validation and ethics: EEG contains stable person-specific structure, so cohort-level models must be interpreted carefully and neural data should be treated as sensitive biometric data. This point fits naturally in an ethics section, with a short methodological reminder in the decoding discussion.
 
 ## Limitations and risks
 
@@ -1039,22 +503,23 @@ Seventh, the subject-identification control in Experiment 11 shows that EEG cont
 
 A natural thesis structure would be:
 
-1. **Introduction**: binocular rivalry, perceptual conflict, EEG decoding, motivation for ML comparison.
-2. **Background**: EEG, oscillations, theta/alpha, binocular rivalry, conflict monitoring, ML for EEG, validation risks.
-3. **Research questions and objectives**: C vs IP and IM vs IP, model comparison, interpretability.
-4. **Dataset and preprocessing**: onset rivalry protocol, event codes, epochs, subject selection, class imbalance, Google Drive data organization.
-5. **Methods**: feature extraction, logistic regression, Riemannian covariance, EEGNet, ST-GNN, transformers, LaBraM, cross-validation, permutation testing, cluster-based statistics.
-6. **Experiments**: notebook pipeline, ablations, clustering, model-specific training, cross-model benchmark.
-7. **Results**: behavioral EDA, C vs IP decoding, IM vs IP decoding, model ranking, interpretability.
-8. **Discussion**: what the results imply for conflict monitoring, why classical methods worked best, why deep models did not dominate, limitations.
-9. **Conclusions and future work**: final answer to the objectives, improvements for reruns, better validation, richer features, subject-transfer analysis.
+1. **Introduction**: binocular rivalry, perceptual conflict, EEG decoding, motivation for comparing decoding approaches.
+2. **Theoretical background**: binocular rivalry, EEG, theta/alpha oscillations, conflict monitoring, and machine learning for EEG.
+3. **Dataset, experimental design, and exploratory analysis**: onset rivalry protocol, event codes, task construction, subject selection, class imbalance, behavioral biases, and concise preprocessing.
+4. **Clustering and statistical characterization**: paper-inspired ROIs, data-driven spatiotemporal clusters, theta/alpha windows, and circularity risks.
+5. **Decoding methods**: logistic regression, Riemannian covariance, SVC clustering, EEGNet, ST-GNN, ST-EEGFormer, LaBraM, cross-validation, and chance testing.
+6. **Results**: EDA summary, clustering results, C vs IP decoding, IM vs IP decoding, cross-model comparison, and interpretability evidence.
+7. **Discussion**: what both contrasts imply, why covariance methods worked well, why deep models did not dominate, and what the limitations mean.
+8. **Ethics**: EEG privacy, subject identity, anonymization, responsible claims about neural decoding, and reproducibility.
+9. **Conclusions and future work**: final answer to the objectives, improvements for reruns, stronger validation, richer features, and subject-transfer analysis.
 
 ## Conclusions
 
-This project investigates whether EEG signals recorded during onset binocular rivalry contain decodable information about perceptual conflict and conflict resolution. The most important contrast is C vs IP, where both conditions lead to pure percept reports but differ in whether physical interocular conflict was present.
+This project investigates whether EEG signals recorded during onset binocular rivalry contain decodable information about perceptual conflict and conflict resolution. The two central contrasts are C vs IP, where pure percept reports differ in physical interocular conflict, and IM vs IP, where incongruent trials differ in whether the reported percept is mixed or pure.
 
-The current evidence supports a cautious positive answer. The signal is weak, but not random: Riemannian covariance classification reaches the best C vs IP performance in the stored cross-model benchmark, and alpha/theta cluster analyses identify biologically plausible time-channel regions. The IM vs IP contrast is less robust and remains more exploratory.
+The current evidence supports a cautious positive answer. The signal is weak, but not random: Riemannian covariance classification reaches the best stored performance, and alpha/theta cluster analyses identify biologically plausible time-channel regions. C vs IP is empirically more robust in the current outputs, while IM vs IP remains harder to decode and should be interpreted with more caution.
 
 The methodological conclusion is also clear. For this dataset, carefully designed classical EEG methods outperform or match more complex deep learning and pretrained models. Riemannian covariance features are especially valuable because they preserve distributed spatial structure while remaining appropriate for small EEG datasets. Deep models remain useful as exploratory tools and for interpretability comparisons, but they require more data, careful tuning, and stricter cache/reproducibility checks before being treated as final evidence.
 
 The thesis should therefore frame the project as a rigorous EEG decoding study rather than a high-accuracy prediction challenge. Its contribution is the systematic comparison of interpretable and modern ML approaches for binocular-rivalry EEG, showing that conflict-related perceptual information is present but subtle, distributed, and highly sensitive to validation design.
+

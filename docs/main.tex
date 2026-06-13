@@ -78,7 +78,7 @@ The analysis proceeds from exploratory data analysis to progressively richer dec
 
 Current results support a cautious positive answer for C vs IP. The signal is not large, but it is not random: Riemannian covariance plus LDA is the most stable model family, Oz-alpha features outperform the simple FCz-theta baseline, and cluster analyses identify posterior alpha effects over broad post-stimulus windows. IM vs IP is weaker and remains exploratory. A central conclusion is methodological: for this small, noisy, subject-specific EEG dataset, carefully constrained classical EEG methods outperform or match larger neural models. The thesis therefore frames the project as a rigorous decoding and validation study of subtle conflict-related EEG structure, rather than as a high-accuracy artificial-intelligence benchmark.
 
-\textbf{Keywords:} binocular rivalry, EEG, perceptual conflict, machine learning, Riemannian decoding, EEGNet, foundation models.
+\textbf{Keywords:} binocular rivalry, EEG, perceptual conflict, machine learning, Riemannian decoding, EEGNet, EEG foundation models.
 
 \newpage
 \section*{Resum}
@@ -90,7 +90,7 @@ L'anàlisi avança des de l'exploració de dades fins a models de descodificaci�
 
 Els resultats actuals donen suport a una resposta positiva però prudent per a C vs IP. El senyal no és gran, però tampoc és aleatori: la covariància riemanniana amb LDA és la família de models més estable, les característiques Oz-alpha superen la línia base FCz-theta, i les anàlisis de clústers identifiquen efectes alpha posteriors en finestres posteriors a l'estímul. IM vs IP és més feble i continua sent exploratori. Una conclusió central és metodològica: en aquest conjunt de dades EEG petit, sorollós i molt dependent del subjecte, els mètodes clàssics d'EEG ben restringits igualen o superen models neuronals més grans.
 
-\textbf{Paraules clau:} rivalitat binocular, EEG, conflicte perceptiu, aprenentatge automàtic, descodificació riemanniana, EEGNet, models fonamentals.
+\textbf{Paraules clau:} rivalitat binocular, EEG, conflicte perceptiu, aprenentatge automàtic, descodificació riemanniana, EEGNet, models fonamentals de EEG.
 
 \newpage
 \section*{Agraïments}
@@ -180,7 +180,7 @@ This allows condition differences to be expressed relative to a pre-stimulus or 
 \subsubsection{Sampling Rate and the Nyquist Criterion}
 The Nyquist-Shannon theorem is an important practical point because the project repeatedly changes the temporal sampling of the EEG. The theorem states that a continuous signal can be represented without aliasing only if it is sampled at more than twice the highest frequency present in the signal \citep{nyquist}. Since the main hypothesis-driven analyses focus on theta and alpha activity, with alpha ending at 12 Hz in the implemented band definition, the minimum theoretical sampling frequency for these bands would be above 24 Hz. This theoretical lower bound is not a practical EEG recommendation: clinical and research EEG generally uses much higher sampling rates, and a sampling rate of at least 256 Hz is commonly recommended for many EEG applications \citep{halford_american_2016}.
 
-The recordings used by Drew et al. were sampled at 500 Hz \citep{drew_binocular_2026}. This is comfortably above the requirement for theta and alpha analysis and also preserves higher-frequency information for broadband experiments. Some deep-learning caches resample the data to 128 Hz. This downsampling is justified for the low-frequency decoding tasks because it remains above the Nyquist limit for the frequency ranges being modelled, while reducing input size, training time and memory requirements. The important caveat is that resampling is itself a preprocessing decision: it should be applied consistently inside the dataset-construction pipeline and should not be mixed across model comparisons unless the comparison is explicitly about sampling rate.
+The recordings used by \citeauthor{drew_binocular_2026} were sampled at 500 Hz. This is comfortably above the requirement for theta and alpha analysis and also preserves higher-frequency information for broadband experiments. Some deep-learning caches resample the data to 128 Hz. This downsampling is justified for the low-frequency decoding tasks because it remains above the Nyquist limit for the frequency ranges being modelled, while reducing input size, training time and memory requirements. The important caveat is that resampling is itself a preprocessing decision: it should be applied consistently inside the dataset-construction pipeline and should not be mixed across model comparisons unless the comparison is explicitly about sampling rate.
 
 \subsection{Binocular Rivalry and Conflict Monitoring}
 In binocular rivalry, incompatible monocular images compete for awareness. The paradigm is useful because perceptual state varies even when the physical input is controlled \citep{blake_can_2014, arnold_why_2011}. The onset design used in the present dataset differs from continuous-report rivalry. Instead of asking participants to report continuously during a long alternation sequence, the stimulus period and the later response screen are separated. This helps reduce direct contamination by motor preparation and button pressing during the stimulus window, although it does not remove every possible decision or memory component.
