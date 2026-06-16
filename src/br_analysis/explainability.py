@@ -15,9 +15,9 @@ MODEL_ORDER = [
     "LR_alpha",
     "Riemann",
     "Experiment_Guided",
+    "SVC_Clustering",
     "EEGNet_Agnostic",
     "EEGNet_Clustering",
-    "SVC_Clustering",
     "ST_GNN",
     "ST_EEGFormer",
     "LaBraM",
@@ -65,7 +65,7 @@ MODEL_COLORS = {
 RELIABLE_SUBJECT_THRESHOLD = 0.55
 RELIABLE_SUBJECT_MIN_MODELS = 3
 RELIABLE_SUBJECT_MIN_MODEL_FRACTION = 0.30
-RELIABLE_COHORT_DEFAULT_N = 10
+RELIABLE_COHORT_DEFAULT_N = 5
 RELIABLE_COHORT_DIAGNOSTIC_MIN_N = 5
 
 ALL_CHANNELS = [
@@ -80,10 +80,30 @@ ALL_CHANNELS = [
 
 THETA_CHANNELS = ["Fp1", "Fp2", "Fz", "F1", "F2", "FCz", "FC1", "FC2", "Cz"]
 ALPHA_CHANNELS = ["Pz", "P1", "P2", "P3", "P4", "P7", "P8", "Oz", "O1", "O2", "PO3", "PO4", "POz"]
+
+SCALP_FRONTAL = [
+    "Fp1", "Fp2", "AF7", "AF3", "AFz", "AF4", "AF8",
+    "F7", "F5", "F3", "F1", "Fz", "F2", "F4", "F6", "F8",
+    "FC5", "FC3", "FC1", "FCz", "FC2", "FC4", "FC6"
+]
+SCALP_TEMPORAL = [
+    "FT7", "FT8", "T7", "T8", "TP7", "TP8"
+]
+SCALP_PARIETAL = [
+    "C5", "C3", "C1", "Cz", "C2", "C4", "C6",
+    "CP5", "CP3", "CP1", "CPz", "CP2", "CP4", "CP6",
+    "P7", "P5", "P3", "P1", "Pz", "P2", "P4", "P6", "P8"
+]
+SCALP_OCCIPITAL = [
+    "PO7", "PO3", "POz", "PO4", "PO8", "O1", "Oz", "O2"
+]
 CLUSTER_CHANNELS = [
     "Fz", "FCz", "FC3", "FC1", "FC2", "C3", "C1", "Cz", "C2",
     "CP3", "CP1", "CPz", "CP2", "CP4", "P5", "P3", "P1", "Pz",
     "P2", "P4", "P6", "P8", "PO3", "POz", "PO4", "PO8", "O1", "Oz", "O2",
+]
+CLUSTER_CHANNELS_IM_IP = [
+    "Fz", "FCz", "Cz", "TP7", "CP5", "CP3", "CP1", "P7", "P5", "P3"
 ]
 
 REFERENCE_N_TIMES = 192
@@ -452,6 +472,39 @@ def selected_subject_ids(cohort: pd.DataFrame) -> list[str]:
     return selected["subject"].astype(str).tolist()
 
 
+def get_model_specific_subjects(
+    df_subject: pd.DataFrame,
+    cohort_subjects: Sequence[str],
+    threshold: float,
+    fallback_threshold: float | None = 0.51,
+) -> dict[str, list[str]]:
+    """Get a dictionary mapping each model to its valid subjects from cohort_subjects.
+
+    A subject is valid for a model if the model's accuracy on that subject is >= threshold.
+    If no subjects in cohort_subjects meet this threshold for a model, we fall back to
+    subjects where accuracy is >= fallback_threshold (if provided).
+    Prior-based classical models (LR_theta, LR_alpha, Riemann, etc.) are always mapped to
+    all cohort_subjects since they do not depend on subject-level estimation.
+    """
+    mapping = {}
+    for model in MODEL_ORDER:
+        if model in df_subject.columns:
+            valid_subs = []
+            for sub in cohort_subjects:
+                acc = df_subject.loc[df_subject["subject"] == sub, model].values
+                if len(acc) > 0 and not pd.isna(acc[0]) and acc[0] >= threshold:
+                    valid_subs.append(sub)
+            if not valid_subs and fallback_threshold is not None:
+                for sub in cohort_subjects:
+                    acc = df_subject.loc[df_subject["subject"] == sub, model].values
+                    if len(acc) > 0 and not pd.isna(acc[0]) and acc[0] >= fallback_threshold:
+                        valid_subs.append(sub)
+            mapping[model] = valid_subs
+        else:
+            mapping[model] = list(cohort_subjects)
+    return mapping
+
+
 def performance_summary_for_subjects(df_subject: pd.DataFrame, subjects: Sequence[str]) -> pd.DataFrame:
     if not subjects:
         return performance_summary(df_subject)
@@ -569,14 +622,20 @@ def _project_channel_values(channels: Sequence[str], values: np.ndarray) -> np.n
     return _normalize_spatial_density(projected, len(channels))
 
 
-def _candidate_channels_for_model(model_name: str, n_values: int) -> list[str] | None:
+def _candidate_channels_for_model(model_name: str, n_values: int, task_tag: str = "c_vs_ip") -> list[str] | None:
+    cluster_ch = CLUSTER_CHANNELS if task_tag == "c_vs_ip" else CLUSTER_CHANNELS_IM_IP
+    
+    if model_name in {"Experiment_Guided", "EEGNet_Clustering", "SVC_Clustering"}:
+        if len(cluster_ch) == n_values:
+            return list(cluster_ch)
+            
     channels = MODEL_CHANNELS.get(model_name)
     if channels is not None and len(channels) == n_values:
         return list(channels)
     if n_values == len(ALL_CHANNELS):
         return list(ALL_CHANNELS)
-    if n_values == len(CLUSTER_CHANNELS):
-        return list(CLUSTER_CHANNELS)
+    if n_values == len(cluster_ch):
+        return list(cluster_ch)
     if model_name == "ST_EEGFormer":
         try:
             from .pretrained import ST_EEGFORMER_CHANNELS
@@ -587,7 +646,8 @@ def _candidate_channels_for_model(model_name: str, n_values: int) -> list[str] |
     return None
 
 
-def canonical_attribution_priors() -> dict[str, dict[str, object]]:
+def canonical_attribution_priors(task_tag: str = "c_vs_ip") -> dict[str, dict[str, object]]:
+    cluster_ch = CLUSTER_CHANNELS if task_tag == "c_vs_ip" else CLUSTER_CHANNELS_IM_IP
     return {
         "LR_theta": {
             "source": "model prior / feature definition",
@@ -619,7 +679,7 @@ def canonical_attribution_priors() -> dict[str, dict[str, object]]:
         "Experiment_Guided": {
             "source": "model prior / cluster restriction",
             "availability": "available_feature_definition",
-            "spatial": _channel_vector(CLUSTER_CHANNELS, [1.0] * len(CLUSTER_CHANNELS)),
+            "spatial": _channel_vector(cluster_ch, [1.0] * len(cluster_ch)),
             "temporal_peak": 0.75,
             "temporal_width": 0.75,
             "stability": "structural_with_circularity_risk",
@@ -628,7 +688,7 @@ def canonical_attribution_priors() -> dict[str, dict[str, object]]:
         "SVC_Clustering": {
             "source": "model prior / cluster restriction",
             "availability": "available_feature_definition",
-            "spatial": _channel_vector(CLUSTER_CHANNELS, [1.0] * len(CLUSTER_CHANNELS)),
+            "spatial": _channel_vector(cluster_ch, [1.0] * len(cluster_ch)),
             "temporal_peak": 0.75,
             "temporal_width": 0.75,
             "stability": "structural_with_circularity_risk",
@@ -665,11 +725,14 @@ def load_deep_attribution_summaries(
     task,
     task_tag: str,
     *,
-    subjects: Sequence[str] | None = None,
+    subjects: Sequence[str] | dict[str, Sequence[str]] | None = None,
 ) -> pd.DataFrame:
-    subject_ids = [str(s) for s in subjects] if subjects is not None else safe_subject_ids(task)
     rows = []
     for model_name in ["EEGNet_Agnostic", "EEGNet_Clustering", "ST_GNN", "ST_EEGFormer", "LaBraM"]:
+        if isinstance(subjects, dict):
+            subject_ids = [str(s) for s in subjects.get(model_name, [])]
+        else:
+            subject_ids = [str(s) for s in subjects] if subjects is not None else safe_subject_ids(task)
         cache_file = cache_paths(paths, task_tag)[model_name]
         fresh, reason = oof_cache_status(cache_file)
         row = {
@@ -690,7 +753,7 @@ def load_deep_attribution_summaries(
                     te_key = f"{sub}_temporal_saliency"
                     if sp_key in data:
                         sp = np.asarray(data[sp_key], dtype=float).ravel()
-                        channels = _candidate_channels_for_model(model_name, len(sp))
+                        channels = _candidate_channels_for_model(model_name, len(sp), task_tag)
                         projected = _project_channel_values(channels, sp) if channels is not None else None
                         if projected is not None:
                             spatial.append(projected)
@@ -733,7 +796,7 @@ def attribution_summary(
     subjects: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     rows = []
-    for model, info in canonical_attribution_priors().items():
+    for model, info in canonical_attribution_priors(task_tag).items():
         rows.append(
             {
                 "Model": model,
@@ -774,7 +837,8 @@ def performance_summary(df_subject: pd.DataFrame) -> pd.DataFrame:
 
 def build_evidence_table(paths, task, task_tag: str) -> tuple[pd.DataFrame, Mapping[str, object]]:
     df_subject, df_cache = load_per_subject_accuracy(paths, task, task_tag)
-    cohort = select_reliable_subject_cohort(df_subject)
+    threshold = 0.53 if task_tag == "im_vs_ip" else 0.55
+    cohort = select_reliable_subject_cohort(df_subject, threshold=threshold)
     perf = performance_summary(df_subject)
     final = load_final_holdout_summary(paths, task_tag)
     attr = attribution_summary(paths, task, task_tag).drop(columns=["Spatial vector", "Temporal vector"])
@@ -795,7 +859,8 @@ def build_evidence_table(paths, task, task_tag: str) -> tuple[pd.DataFrame, Mapp
     )
     table["Confound risk level"] = table.apply(_confound_risk, axis=1)
     table["Thesis-use recommendation"] = table.apply(_recommendation, axis=1)
-    table = table.sort_values(["Mean accuracy", "N subjects"], ascending=[False, False], na_position="last")
+    table["Model"] = pd.Categorical(table["Model"], categories=MODEL_ORDER, ordered=True)
+    table = table.sort_values("Model").reset_index(drop=True)
     return table, {"subjects": df_subject, "cache_status": df_cache, "selected_cohort": cohort}
 
 
@@ -922,7 +987,8 @@ def convergence_table(
     task_tag: str,
     *,
     subjects: Sequence[str] | None = None,
-    weight_col: str = "Reliability margin",
+    weight_col: str = "Selected cohort reliability weight",
+    four_regions: bool = False,
 ) -> pd.DataFrame:
     attr = attribution_summary(paths, task, task_tag, subjects=subjects)
     if weight_col in evidence.columns:
@@ -930,36 +996,46 @@ def convergence_table(
     else:
         weights = evidence.set_index("Model")["Reliability margin"].clip(lower=0.0).fillna(0.0)
     rows = []
+    lookup = {name.upper(): i for i, name in enumerate(ALL_CHANNELS)}
     for _, row in attr.iterrows():
         model = row["Model"]
         spatial = row["Spatial vector"]
         if spatial is None or np.isscalar(spatial):
-            frontal = posterior = 0.0
+            frontal = temporal = parietal = occipital = 0.0
         else:
             spatial = np.asarray(spatial, dtype=float)
-            lookup = {name: i for i, name in enumerate(ALL_CHANNELS)}
-            frontal = float(sum(spatial[lookup[ch]] for ch in THETA_CHANNELS if ch in lookup))
-            posterior = float(sum(spatial[lookup[ch]] for ch in ALPHA_CHANNELS if ch in lookup))
-        rows.append(
-            {
-                "Model": model,
-                "Display": MODEL_LABELS[model],
-                "Reliability weight": float(weights.get(model, 0.0)),
-                "Frontal/theta-region alignment": frontal,
-                "Posterior/alpha-region alignment": posterior,
-                "Attribution availability": row["Attribution availability"],
-                "Attribution stability": row["Attribution stability"],
-            }
-        )
+            total = np.abs(spatial).sum()
+            if total > 0:
+                spatial = spatial / total
+            frontal = float(sum(spatial[lookup[ch.upper()]] for ch in SCALP_FRONTAL if ch.upper() in lookup))
+            temporal = float(sum(spatial[lookup[ch.upper()]] for ch in SCALP_TEMPORAL if ch.upper() in lookup))
+            parietal = float(sum(spatial[lookup[ch.upper()]] for ch in SCALP_PARIETAL if ch.upper() in lookup))
+            occipital = float(sum(spatial[lookup[ch.upper()]] for ch in SCALP_OCCIPITAL if ch.upper() in lookup))
+        
+        weight = float(weights.get(model, 0.0))
+        r = {
+            "Model": model,
+            "Display": MODEL_LABELS[model],
+            "Reliability weight": weight,
+            "Attribution availability": row["Attribution availability"],
+            "Attribution stability": row["Attribution stability"],
+            "Frontal alignment": frontal,
+            "Temporal alignment": temporal,
+            "Parietal alignment": parietal,
+            "Occipital alignment": occipital,
+        }
+        rows.append(r)
     df = pd.DataFrame(rows)
     total_weight = df["Reliability weight"].sum()
     if total_weight > 0:
         df["Weighted convergence contribution"] = df["Reliability weight"] * (
-            df["Frontal/theta-region alignment"] + df["Posterior/alpha-region alignment"]
+            df["Frontal alignment"] + df["Occipital alignment"]
         ) / 2.0
     else:
         df["Weighted convergence contribution"] = 0.0
-    return df.sort_values("Weighted convergence contribution", ascending=False)
+    df["Model"] = pd.Categorical(df["Model"], categories=MODEL_ORDER, ordered=True)
+    df = df.sort_values("Model").reset_index(drop=True)
+    return df
 
 
 def synthesis_text(context: ExplainabilityContext, evidence: pd.DataFrame, convergence: pd.DataFrame) -> str:
@@ -1015,18 +1091,18 @@ def plot_evidence_overview(evidence: pd.DataFrame, task_tag: str, *, save_path: 
     import matplotlib.pyplot as plt
     import seaborn as sns
 
-    plot_df = evidence.dropna(subset=["Mean accuracy"]).copy()
+    plot_df = evidence.dropna(subset=["Selected cohort mean accuracy"]).copy()
     if plot_df.empty:
         print("No fresh accuracy evidence available to plot.")
         return None
-    plot_df = plot_df.sort_values("Mean accuracy", ascending=True)
+    plot_df = plot_df.sort_values("Selected cohort mean accuracy", ascending=True)
     colors = [MODEL_COLORS.get(m, "#777777") for m in plot_df["Model"]]
     fig, ax = plt.subplots(figsize=(10, 5), dpi=150)
-    ax.barh(plot_df["Display"], plot_df["Mean accuracy"], color=colors, alpha=0.88)
+    ax.barh(plot_df["Display"], plot_df["Selected cohort mean accuracy"], color=colors, alpha=0.88)
     ax.axvline(0.5, color="black", linestyle="--", linewidth=1.2, label="nominal chance")
-    ax.set_xlim(0.45, max(0.7, float(plot_df["Mean accuracy"].max()) + 0.04))
-    ax.set_xlabel("Mean subject OOF accuracy")
-    ax.set_title(f"Performance-weighted explainability evidence: {_task_label(task_tag)}", fontweight="bold")
+    ax.set_xlim(0.45, max(0.6, float(plot_df["Selected cohort mean accuracy"].max()) + 0.04))
+    ax.set_xlabel("Selected cohort mean subject OOF accuracy")
+    ax.set_title(f"Selected-cohort explainability performance overview: {_task_label(task_tag)}", fontweight="bold")
     ax.legend(loc="lower right")
     sns.despine(fig=fig)
     fig.tight_layout()
@@ -1041,15 +1117,27 @@ def plot_convergence(convergence: pd.DataFrame, task_tag: str, *, save_path: Pat
 
     plot_df = convergence.copy()
     fig, ax = plt.subplots(figsize=(10, 5), dpi=150)
-    width = 0.38
+    
+    regions = [
+        ("Frontal alignment", "Frontal region", "#2878b5"),
+        ("Temporal alignment", "Temporal region", "#756bb1"),
+        ("Parietal alignment", "Parietal region", "#1b9e77"),
+        ("Occipital alignment", "Occipital region", "#d95f02"),
+    ]
+
     x = np.arange(len(plot_df))
-    ax.bar(x - width / 2, plot_df["Frontal/theta-region alignment"], width, label="frontal/theta-region")
-    ax.bar(x + width / 2, plot_df["Posterior/alpha-region alignment"], width, label="posterior/alpha-region")
+    bottom = np.zeros(len(plot_df))
+    
+    for col, label, color in regions:
+        vals = plot_df[col].fillna(0.0).to_numpy()
+        ax.bar(x, vals, bottom=bottom, label=label, color=color, alpha=0.85, width=0.55)
+        bottom += vals
+
     ax.set_xticks(x)
-    ax.set_xticklabels(plot_df["Display"], rotation=35, ha="right")
-    ax.set_ylabel("Attribution mass / structural prior mass")
+    ax.set_xticklabels(plot_df["Display"], rotation=30, ha="right")
+    ax.set_ylabel("Attribution mass proportion (sum = 1.0)")
     ax.set_title(f"Cross-model sensor-region convergence: {_task_label(task_tag)}", fontweight="bold")
-    ax.legend()
+    ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
     sns.despine(fig=fig)
     fig.tight_layout()
     if save_path is not None:
@@ -1072,6 +1160,12 @@ def _safe_temporal_vector(value) -> np.ndarray | None:
     arr = np.asarray(value, dtype=float).ravel()
     if arr.size == 0:
         return None
+    target_size = 192
+    if arr.size != target_size:
+        x_old = np.linspace(0, 1, arr.size)
+        x_new = np.linspace(0, 1, target_size)
+        arr = np.interp(x_new, x_old, arr)
+    arr = _normalize(arr)
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
 
@@ -1093,7 +1187,7 @@ def consensus_diagnostic(
     task,
     task_tag: str,
     *,
-    subjects: Sequence[str],
+    subjects: Sequence[str] | dict[str, Sequence[str]],
     df_subject: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[str, np.ndarray | float | None]]:
     """Build exploratory weighted/unweighted consensus summaries for the shared cohort."""
@@ -1115,7 +1209,9 @@ def consensus_diagnostic(
         if spatial is not None:
             spatial_rows.append((model, weight, spatial))
         if temporal is not None:
-            temporal_rows.append((model, weight, temporal))
+            # Exclude prior-based models with Gaussian temporal priors and ST-EEGFormer from the temporal consensus
+            if model not in {"LR_theta", "LR_alpha", "Riemann", "Experiment_Guided", "SVC_Clustering", "ST_EEGFormer"}:
+                temporal_rows.append((model, weight, temporal))
         peak_time = np.nan
         if temporal is not None:
             times = _time_axis(len(temporal), task)
@@ -1134,7 +1230,21 @@ def consensus_diagnostic(
     def aggregate(rows: list[tuple[str, float, np.ndarray]], weighted: bool) -> np.ndarray | None:
         if not rows:
             return None
-        arrays = np.vstack([item[2] for item in rows])
+        lengths = [len(item[2]) for item in rows]
+        if len(set(lengths)) > 1:
+            target_size = 192
+            resampled = []
+            for item in rows:
+                arr = item[2]
+                if len(arr) == target_size:
+                    resampled.append(arr)
+                else:
+                    x_old = np.linspace(0, 1, len(arr))
+                    x_new = np.linspace(0, 1, target_size)
+                    resampled.append(np.interp(x_new, x_old, arr))
+            arrays = np.vstack(resampled)
+        else:
+            arrays = np.vstack([item[2] for item in rows])
         if weighted:
             w = np.asarray([item[1] for item in rows], dtype=float)
             if float(w.sum()) <= 0:
@@ -1143,11 +1253,17 @@ def consensus_diagnostic(
         return np.nanmean(arrays, axis=0)
 
     weighted_spatial = aggregate(spatial_rows, weighted=True)
-    unweighted_spatial = aggregate(spatial_rows, weighted=False)
     weighted_temporal = aggregate(temporal_rows, weighted=True)
-    unweighted_temporal = aggregate(temporal_rows, weighted=False)
 
-    selected_df = df_subject[df_subject["subject"].astype(str).isin([str(s) for s in subjects])].copy()
+    if isinstance(subjects, dict):
+        all_cohort_subs = set()
+        for subs in subjects.values():
+            all_cohort_subs.update(subs)
+        flat_subjects = list(all_cohort_subs)
+    else:
+        flat_subjects = list(subjects)
+
+    selected_df = df_subject[df_subject["subject"].astype(str).isin([str(s) for s in flat_subjects])].copy()
     model_cols = [model for model in MODEL_ORDER if model in selected_df.columns]
     boot_std = np.nan
     if len(selected_df) >= 5 and model_cols:
@@ -1161,21 +1277,19 @@ def consensus_diagnostic(
         boot_std = float(np.nanstd(boot_scores))
 
     summary = pd.DataFrame(summary_rows)
-    summary["Weighted vs unweighted spatial cosine"] = _cosine_similarity(weighted_spatial, unweighted_spatial)
-    summary["Weighted vs unweighted temporal cosine"] = _cosine_similarity(weighted_temporal, unweighted_temporal)
     summary["Bootstrap selected-subject mean-accuracy std"] = boot_std
+    summary["Model"] = pd.Categorical(summary["Model"], categories=MODEL_ORDER, ordered=True)
+    summary = summary.sort_values("Model").reset_index(drop=True)
 
     vectors: dict[str, np.ndarray | float | None] = {
         "weighted_spatial": weighted_spatial,
-        "unweighted_spatial": unweighted_spatial,
         "weighted_temporal": weighted_temporal,
-        "unweighted_temporal": unweighted_temporal,
         "bootstrap_std": boot_std,
     }
     return summary, vectors
 
 
-def _plot_topomap(ax, values: np.ndarray, *, title: str, cmap: str, vlim: float | None = None):
+def _plot_topomap(ax, values: np.ndarray, *, title: str, cmap: str, vmin: float | None = None, vlim: float | None = None):
     import matplotlib.pyplot as plt
     import matplotlib.tri as mtri
 
@@ -1183,6 +1297,8 @@ def _plot_topomap(ax, values: np.ndarray, *, title: str, cmap: str, vlim: float 
     if vlim is None:
         vmax = float(np.nanmax(np.abs(values))) if np.size(values) else 0.0
         vlim = vmax if vmax > 0 else 1.0
+    if vmin is None:
+        vmin = -vlim
     x = xy[:, 0]
     y = xy[:, 1]
     head = plt.Circle((0, 0), 1.08, color="black", fill=False, linewidth=1.0)
@@ -1190,9 +1306,9 @@ def _plot_topomap(ax, values: np.ndarray, *, title: str, cmap: str, vlim: float 
     ax.plot([0.0, -0.08, 0.08, 0.0], [1.08, 1.18, 1.18, 1.08], color="black", linewidth=1.0)
     try:
         triang = mtri.Triangulation(x, y)
-        im = ax.tricontourf(triang, values, levels=15, cmap=cmap, vmin=-vlim, vmax=vlim)
+        im = ax.tricontourf(triang, values, levels=15, cmap=cmap, vmin=vmin, vmax=vlim)
     except Exception:
-        im = ax.scatter(x, y, c=values, cmap=cmap, vmin=-vlim, vmax=vlim, s=80)
+        im = ax.scatter(x, y, c=values, cmap=cmap, vmin=vmin, vmax=vlim, s=80)
     ax.scatter(x, y, c="black", s=5, alpha=0.65)
     ax.set_aspect("equal")
     ax.set_xlim(-1.2, 1.2)
@@ -1258,7 +1374,6 @@ def plot_shared_cohort_spatial_topomaps(
         _safe_spatial_vector(attr.loc[model, "Spatial vector"]) if model in attr.index else None
         for model in MODEL_ORDER
     ]
-    vmax = max([float(np.nanmax(np.abs(v))) for v in spatial_vectors if v is not None] or [1.0])
     for ax, model, vector in zip(axes.ravel(), MODEL_ORDER, spatial_vectors):
         if vector is None:
             ax.axis("off")
@@ -1266,7 +1381,8 @@ def plot_shared_cohort_spatial_topomaps(
             continue
         weight = evidence.set_index("Model").get("Selected cohort reliability weight", pd.Series(dtype=float)).get(model, np.nan)
         title = f"{MODEL_LABELS[model]}\nw={weight:.3f}" if pd.notna(weight) else MODEL_LABELS[model]
-        _plot_topomap(ax, vector, title=title, cmap="RdBu_r", vlim=vmax)
+        vmax = float(np.nanmax(vector)) if np.size(vector) and np.nanmax(vector) > 0.0 else 1.0
+        _plot_topomap(ax, vector, title=title, cmap="Reds", vmin=0.0, vlim=vmax)
     fig.suptitle(f"Shared-cohort spatial importance: {_task_label(task_tag)}", fontweight="bold")
     fig.tight_layout()
     if save_path is not None:
@@ -1274,7 +1390,7 @@ def plot_shared_cohort_spatial_topomaps(
     return fig
 
 
-def plot_shared_cohort_temporal_saliency(
+def plot_shared_cohort_temporal_attribution(
     evidence: pd.DataFrame,
     paths,
     task,
@@ -1307,7 +1423,7 @@ def plot_shared_cohort_temporal_saliency(
             alpha=alpha,
             linestyle=linestyle,
         )
-    ax.set_title(f"Shared-cohort temporal saliency: {_task_label(task_tag)}", fontweight="bold")
+    ax.set_title(f"Shared-cohort temporal attribution: {_task_label(task_tag)}", fontweight="bold")
     ax.set_xlabel("Time from stimulus onset (s)")
     ax.set_ylabel("Normalized importance")
     ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=8)
@@ -1362,9 +1478,9 @@ def plot_peak_time_difference_topomaps(
             ax.set_title(f"{MODEL_LABELS[model]}\nno map", fontsize=9)
             continue
         peak = peak_times.get(model, np.nan)
-        title = f"{MODEL_LABELS[model]}\npeak {peak:.2f}s minus avg" if pd.notna(peak) else f"{MODEL_LABELS[model]}\nminus avg"
+        title = f"{MODEL_LABELS[model]}\npeak {peak:.2f}s dev." if pd.notna(peak) else f"{MODEL_LABELS[model]}\ndeviation"
         _plot_topomap(ax, model_vectors[model] - average, title=title, cmap="RdBu_r", vlim=vmax)
-    fig.suptitle(f"Peak-time model-minus-average topomaps: {_task_label(task_tag)}", fontweight="bold")
+    fig.suptitle(f"Peak-time spatial deviation from average: {_task_label(task_tag)}", fontweight="bold")
     fig.tight_layout()
     if save_path is not None:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -1382,41 +1498,28 @@ def plot_consensus_diagnostic(
     import seaborn as sns
 
     weighted_spatial = _safe_spatial_vector(vectors.get("weighted_spatial"))
-    unweighted_spatial = _safe_spatial_vector(vectors.get("unweighted_spatial"))
     weighted_temporal = _safe_temporal_vector(vectors.get("weighted_temporal"))
-    unweighted_temporal = _safe_temporal_vector(vectors.get("unweighted_temporal"))
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), dpi=150)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), dpi=150)
 
-    spatial_vmax = max(
-        [float(np.nanmax(np.abs(v))) for v in [weighted_spatial, unweighted_spatial] if v is not None] or [1.0]
-    )
-    for ax, vector, title in [
-        (axes[0, 0], weighted_spatial, "Weighted consensus"),
-        (axes[0, 1], unweighted_spatial, "Unweighted consensus"),
-    ]:
-        if vector is None:
-            ax.axis("off")
-            ax.set_title(f"{title}\nnot available")
-        else:
-            _plot_topomap(ax, vector, title=title, cmap="RdBu_r", vlim=spatial_vmax)
-
-    for vector, label, color, linestyle in [
-        (weighted_temporal, "Weighted", "black", "-"),
-        (unweighted_temporal, "Unweighted", "gray", "--"),
-    ]:
-        if vector is not None:
-            axes[1, 0].plot(_time_axis(len(vector), task), np.abs(vector), label=label, color=color, linestyle=linestyle)
-    axes[1, 0].set_title("Temporal consensus")
-    axes[1, 0].set_xlabel("Time from stimulus onset (s)")
-    axes[1, 0].set_ylabel("Normalized importance")
-    axes[1, 0].legend()
-
-    if weighted_spatial is not None and unweighted_spatial is not None:
-        diff = weighted_spatial - unweighted_spatial
-        _plot_topomap(axes[1, 1], diff, title="Weighted minus unweighted", cmap="RdBu_r")
+    # Spatial plot
+    ax_sp = axes[0]
+    if weighted_spatial is None:
+        ax_sp.axis("off")
+        ax_sp.set_title("Weighted consensus spatial\nnot available")
     else:
-        axes[1, 1].axis("off")
-        axes[1, 1].set_title("Weighted minus unweighted\nnot available")
+        spatial_vmax = float(np.nanmax(weighted_spatial)) if np.nanmax(weighted_spatial) > 0.0 else 1.0
+        _plot_topomap(ax_sp, weighted_spatial, title="Weighted spatial consensus", cmap="Reds", vmin=0.0, vlim=spatial_vmax)
+
+    # Temporal plot
+    ax_te = axes[1]
+    if weighted_temporal is None:
+        ax_te.axis("off")
+        ax_te.set_title("Weighted consensus temporal\nnot available")
+    else:
+        ax_te.plot(_time_axis(len(weighted_temporal), task), np.abs(weighted_temporal), color="black", linewidth=2)
+        ax_te.set_title("Weighted temporal consensus")
+        ax_te.set_xlabel("Time from stimulus onset (s)")
+        ax_te.set_ylabel("Normalized importance")
 
     fig.suptitle(f"Experimental consensus diagnostic: {_task_label(task_tag)}", fontweight="bold")
     sns.despine(fig=fig)
