@@ -5,10 +5,6 @@ __pycache__/
 .env
 tfg-nils-2026-dataset.zip
 TFG_Nils_2026/
-main.aux
-main.fdb_latexmk
-main.fls
-main.log
-main.out
-main.synctex.gz
-main.toc
+TFG_Nils_Codi.zip
+docs/
+.github/

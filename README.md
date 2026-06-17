@@ -1,9 +1,17 @@
-# Binocular Rivalry: Evaluating the Role of Theta Power as a Neural Index of Conflict
+# AI For Cognition: Decoding Cogntivie Conflict and Conscious Perception from EEG Signals in Binocular Rivalry
 
-This repository contains the source code, analysis pipelines, and Jupyter notebooks for a **Treball de Fi de Grau (TFG)** investigating the neural mechanisms of cognitive conflict and attention in **Binocular Rivalry (BR)** using Electroencephalography (EEG) and Machine/Deep Learning classifiers.
+This repository contains the source code, analysis pipelines, and Jupyter notebooks for the **Treball de Fi de Grau (TFG)** investigating the neural mechanisms of cognitive conflict and attention in **Binocular Rivalry (BR)** using Electroencephalography (EEG) and Machine/Deep Learning classifiers.
+
+📄 **[Final Thesis Report: AI for Cognition: Decoding Cognitive Conflict and Conscious Perception from EEG Signals in Binocular Rivalry](TFG.pdf)**
 
 The project builds upon the theoretical framework of conflict monitoring and cognitive control, validating findings from the accompanying research article:  
-📄 **[Drew et al., 2026 - Binocular Rivalry: Evaluating the Role of Theta Power as a Neural Index of Conflict](file:///c:/Users/nils/Documents/Universitat/TFG/docs/bibliografia/00_Binocular%20Rivalry%20Evaluating%20the%20Role%20of%20Theta%20Power%20as%20a%20Neural%20Index%20of%20Conflict.pdf)** (Draft located in [00_BR.md](file:///c:/Users/nils/Documents/Universitat/TFG/docs/markdown/00_BR.md)).
+📄 **[Drew et al., 2026 - Binocular Rivalry: Evaluating the Role of Theta Power as a Neural Index of Conflict](https://onlinelibrary.wiley.com/doi/10.1111/ejn.70372)**.
+
+## 💾 Dataset Access
+
+The raw and preprocessed EEG dataset used in this project, introduced by Drew, Torralba, et al., is publicly available on the Open Science Framework (OSF):
+
+🔗 **[Dataset & Analysis Code on OSF (https://osf.io/f9gez)](https://osf.io/f9gez)**
 
 ---
 
@@ -33,6 +41,22 @@ graph TD
 ### Decoding Tasks
 - **Task 1: Congruent vs. Incongruent Pure ($C\text{ vs. }IP$)**: Evaluates conflict monitoring per se. Because both conditions result in the same subjective experience (a pure percept), any differences in neural activity reflect the resolution of physical interocular conflict.
 - **Task 2: Incongruent Mixed vs. Incongruent Pure ($IM\text{ vs. }IP$)**: Investigates the neural correlates of successful conflict resolution versus unstable rivalry dynamics.
+
+---
+
+## 📈 Scientific Findings Summary
+
+### 1. Spatiotemporal Clustering & Replication
+* **Posterior Alpha vs. Fronto-Medial Theta**: The project partially replicates previous findings, but shows that the parieto-occipital alpha effect for C vs IP is the most robust and reproducible pattern across a broad post-stimulus interval. In contrast, fronto-medial theta effects are more fragile and sensitive to spatial and temporal window choices.
+* **Task Stability**: Conflict resolution dynamics (C vs IP) produce more stable spatiotemporal clusters than mixed percept dynamics (IM vs IP), which show higher subject-level variability.
+
+### 2. Single-Trial Decoding Constraints
+* **Task Decoding**: Single-trial decoding of C vs IP yields cautiously positive results with weak but structured discriminative information. In contrast, decoding IM vs IP remains largely exploratory and near chance levels across models.
+* **Model Complexity**: Increasing model complexity does not systematically improve decoding. Classical methods with strong EEG-specific inductive biases (specifically **Riemannian Covariance + LDA**) outperformed or matched complex deep learning architectures (EEGNet, ST-GNN) and large foundation models (ST-EEGFormer, LaBraM).
+
+### 3. Interpretability & Feature Relevance
+* **Distributed Information**: Above-chance decoding relies on distributed multichannel structure rather than isolated scalar power features from a single electrode.
+* **Spatial Attribution**: Model attribution analyses converge on broad posterior and central-posterior sensor relevance, supporting the conclusion that conflict-related perceptual information in this dataset is best captured by distributed posterior alpha and covariance patterns.
 
 ---
 
@@ -181,6 +205,7 @@ The source code is organized into a modular helper library ([src/br_analysis](fi
 * **[20_LaBraM_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/20_LaBraM_im_ip.ipynb)**: Applies the LaBraM LoRA fine-tuning transfer learning pipeline to decode **Incongruent Mixed vs. Incongruent Pure** trials.
 * **[21_cross_model_comparison_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/21_cross_model_comparison_im_ip.ipynb)**: Centralizes all cohort-wide cross-model benchmark comparisons for the **Incongruent Mixed vs. Incongruent Pure** task.
 * **[22_explainability_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/22_explainability_im_ip.ipynb)**: Centralizes spatial and temporal feature attribution analyses (Saliency and SHAP) for the **Incongruent Mixed vs. Incongruent Pure** task.
+* **[23_SVC_clustering_c_ip_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/23_SVC_clustering_c_ip_im_ip.ipynb)**: Evaluates a cluster-restricted Support Vector Classifier (SVC) using features extracted from the data-driven spatiotemporal clusters for both C vs IP and IM vs IP tasks.
 
 
 ---
@@ -192,8 +217,10 @@ The source code is organized into a modular helper library ([src/br_analysis](fi
 * **[datasets.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/datasets.py)**: Handles loading, unit corrections (to Volts), filtering, and balanced class undersampling of MNE EEG epochs (`.fif` files) into structured arrays. It includes custom safeguards to copy Google Drive network-mounted data locally to prevent Windows I/O latency bottlenecks.
 * **[deep.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/deep.py)**: Provides PyTorch-specific raw EEG epoch data loading, channel resampling, and spatial distance-based adjacency matrix generation for Graph Neural Network training. *(Paired with `datasets.py`)*.
 * **[experiments.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/experiments.py)**: Houses execution routines for classical ML pipelines. It implements a custom forward-chaining cross-validation strategy ([temporal_stratified_splits](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/experiments.py#L94-L139)) to avoid temporal leakage, permutation-based surrogate null distributions, and a background thread-driven [ProgressTracker](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/experiments.py#L21-L56) showing high-resolution progress updates for parallel subject training.
+* **[explainability.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/explainability.py)**: Centralizes spatial and temporal feature attribution analyses for the deep learning models using Integrated Gradients.
 * **[features.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/features.py)**: Defines feature transformers for classical classifiers, including the [HilbertMeanEnvelope](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/features.py#L10-L17) extraction and [MeanPower](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/features.py#L20-L25).
 * **[models.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/models.py)**: Configures scikit-learn models. Features a [SafeLogisticRegressionCV](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/models.py#L13-L50) class that adjusts cross-validation splits dynamically or falls back to standard logistic regression to handle subjects with highly skewed or low trial numbers, alongside the [RiemannLdaModelFactory](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/models.py#L85-L100).
+* **[models_mae_eeg.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/models_mae_eeg.py)**: Implements the Masked Autoencoder (MAE) and Vision Transformer backbones used for EEG foundation models like LaBraM.
 * **[plotting.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/plotting.py)**: Exposes functions to plot subject-wise learning curves, aggregate classification accuracy distributions with correct fractional coordinate alignments, MNE-based spatial topomaps of model weights or saliencies, and attention heatmaps.
 * **[torch_models.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_models.py)**: Defines the deep learning architectures used for decoding. Contains [EEGNet](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_models.py#L11-L60) (a compact temporal-spatial convolutional network), [STGNNChebConv](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_models.py#L93-L135) (a Spatio-Temporal Graph Neural Network using Chebyshev convolutions), and [STEEGFormerLoRA](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_models.py#L318-L387) (a Spatio-Temporal Transformer with custom LoRA adapters).
 * **[pretrained.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/pretrained.py)**: Provides configuration specifications, pre-trained backbone loading utilities, and helper functions to inject Low-Rank Adaptation (LoRA) adapters into linear layers. *(Paired with `torch_models.py`)*.
@@ -205,17 +232,3 @@ The source code is organized into a modular helper library ([src/br_analysis](fi
 
 * **[br.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/scripts/br.py)**: A Manim mathematical animation script which generates high-quality schematic video visualizations of the binocular rivalry trial timeline, stimulus representations (Gabor gratings, mirror goggles), congruent/incongruent setups, and pure vs. mixed percept reporting options.
 
----
-
-## 📈 Scientific Findings Summary
-
-### 1. Fronto-Medial Theta (5–7 Hz) as a Neural Index of Conflict
-* **Conflict Modulation**: Fronto-medial (fm) theta power is significantly higher during the 500–1000 ms time window for incongruent pure (rivalrous) trials than for congruent (non-rivalrous) trials. This occurs despite the elimination of motor reporting confounds, supporting the hypothesis that fm-theta acts as a direct neural index of cognitive/sensory conflict.
-* **Pure vs. Mixed Dynamics**: Contrary to the initial exploratory prediction, theta power is significantly higher in incongruent pure trials than incongruent mixed trials, indicating that pure percept selection reflects a robust conflict resolution process.
-
-### 2. Parieto-Occipital Alpha (8–12 Hz) and Attentional Suppression
-* **Attentional Engagement**: Parieto-occipital alpha power is suppressed (lower power) during incongruent pure trials compared to congruent trials, indicating increased attentional engagement and active suppression of the rival eye to resolve sensory competition.
-
-### 3. Explainability & Spatial Topographies Convergence
-* **Spatial Saliency & SHAP Consistency**: Across GNN Chebyshev graph convolutions and Multi-Head Self-Attention layers in pre-trained transformers, both backpropagation saliency mappings and SHAP (`shap.GradientExplainer`) feature attributions converge on similar spatial and temporal profiles.
-* **Sensor Importance Map**: Group-level t-tests (masked at $p_{\text{FDR}} < 0.05$) reveal that the models heavily rely on fronto-medial sensor locations (e.g., Fz, FCz, Cz) in the theta band, and parieto-occipital sensor locations (e.g., POz, Oz) in the alpha band during the key conflict resolution window, mirroring the biological findings of Drew et al.
