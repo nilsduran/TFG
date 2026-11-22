@@ -1,11 +1,31 @@
+# Local data and generated outputs
 data/
+artifacts/
+build/
+dist/
+*.egg-info/
+
+# Python / tooling caches
 __pycache__/
 *.pyc
+.venv/
+.ruff_cache/
+.pytest_cache/
 .ipynb_checkpoints/
 .env
-tfg-nils-2026-dataset.zip
+
+# Thesis working files: only the figures and the usage guide are published
+docs/*
+!docs/images/
+!docs/usage.md
+
+# Manim renders (only the final videos are kept)
+media/*
+!media/videos/
+media/videos/**/partial_movie_files/
+
+# Local archives and private material
+*.zip
 TFG_Nils_2026/
-TFG_Nils_Codi.zip
-docs/
+.agents/
 .github/
-media/

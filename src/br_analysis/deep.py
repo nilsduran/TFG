@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from pathlib import Path
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 import mne
 import numpy as np
-import pandas as pd
+from scipy.integrate import trapezoid
+from scipy.signal import welch
 
 from .config import BinaryTaskConfig, ProjectPaths
-from .datasets import LoadedDataset, _read_eeg_epochs, _select_binary_epochs, _subject_ids, _subject_seed, _undersample
+from .data import load_epoch_dataset
+from .datasets import LoadedDataset
+from .preprocessing import PreprocessingPreset
 
 
 @dataclass(frozen=True)
@@ -28,132 +30,29 @@ def load_raw_epoch_dataset(
     *,
     verbose: bool = True,
 ) -> LoadedDataset:
-    """Load binary EEG epochs for deep models with shape (trials, channels, times)."""
-    import joblib
-
-    # Construct a cache key/filename based on task and spec to allow fast loading
-    # Normalize/clean model-specific suffix from task name to enable shared caching
-    base_task_name = task.name
-    if "c_vs_i" in task.name:
-        base_task_name = "c_vs_ip"
-    elif "im_vs_ip" in task.name:
-        base_task_name = "im_vs_ip"
-
-
-    picks_hash = hash(tuple(spec.picks)) if spec.picks else "all"
-    bandpass_str = f"{spec.bandpass[0]}_{spec.bandpass[1]}" if spec.bandpass else "none"
-    sfreq_str = f"{spec.resample_sfreq}" if spec.resample_sfreq else "native"
+    """Load EEG epochs without subject selection or class undersampling."""
     analysis_window = spec.analysis_window if spec.analysis_window is not None else task.analysis_window
-    task_for_selection = replace(task, analysis_window=analysis_window)
-    window_str = f"{analysis_window[0]}_{analysis_window[1]}" if analysis_window else "full"
-    cache_name = f"dataset_{base_task_name}_subj{task.max_subjects}_bp{bandpass_str}_sf{sfreq_str}_win{window_str}_pk{picks_hash}.joblib"
-    
-    shared_cache_dir = paths.analysis_root / "cache"
-    shared_cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = shared_cache_dir / cache_name
-
-    if cache_path.exists():
-        if verbose:
-            print(f"Loading preprocessed dataset from cache: {cache_path}")
-        try:
-            return joblib.load(cache_path)
-        except Exception as e:
-            if verbose:
-                print(f"Cache read failed, reloading from source. Error: {e}")
-
-    subject_ids = _subject_ids(task.selected_subjects_csv, task.max_subjects)
-    fif_by_subject = {p.stem: p for p in paths.data_files}
-    x_blocks: list[np.ndarray] = []
-    y_blocks: list[np.ndarray] = []
-    subj_blocks: list[str] = []
-    skipped: list[str] = []
-    common_ch_names: list[str] | None = None
-    times: np.ndarray | None = None
-    common_info = None
-    common_chs_info: list[dict] | None = None
-    sfreq: float | None = None
-
-    if verbose:
-        print(f"Selected subjects to load: {len(subject_ids)}")
-
-    for subj_name in subject_ids:
-        fif_path = fif_by_subject.get(subj_name)
-        if fif_path is None:
-            skipped.append(f"{subj_name}: .fif file not found")
-            continue
-
-        ep = _read_eeg_epochs(fif_path, preload=True)
-        if spec.picks is not None:
-            available = [ch for ch in spec.picks if ch in ep.ch_names]
-            if len(available) < max(2, int(0.5 * len(spec.picks))):
-                skipped.append(f"{fif_path.name}: too few required channels")
-                continue
-            ep = ep.copy().pick(available)
-
-        ep, y_s, reason = _select_binary_epochs(ep, task_for_selection)
-        if ep is None or y_s is None:
-            skipped.append(f"{fif_path.name}: {reason}")
-            continue
-        if task.undersample_classes:
-            ep, y_s = _undersample(ep, y_s, seed=_subject_seed(task, subj_name))
-        if spec.bandpass is not None:
-            ep._data = np.ascontiguousarray(ep._data)
-            ep.filter(l_freq=spec.bandpass[0], h_freq=spec.bandpass[1], method="iir", verbose=False)
-        if spec.resample_sfreq is not None:
-            ep.resample(spec.resample_sfreq, verbose=False)
-
-        if common_ch_names is None:
-            common_ch_names = list(ep.ch_names)
-            common_info = ep.info.copy()
-            common_chs_info = [dict(ch) for ch in ep.info["chs"]]
-            sfreq = float(ep.info["sfreq"])
-        else:
-            keep = [ch for ch in common_ch_names if ch in ep.ch_names]
-            if len(keep) != len(common_ch_names):
-                common_ch_names = keep
-                x_blocks = [x[:, : len(common_ch_names), :] for x in x_blocks]
-            ep = ep.copy().pick(common_ch_names)
-
-        if times is None:
-            times = np.array(ep.times, dtype=np.float32)
-        x_blocks.append(ep.get_data().astype(np.float32))
-        y_blocks.append(y_s)
-        subj_blocks.extend([subj_name] * len(y_s))
-
-    if not x_blocks:
-        raise RuntimeError("No valid subjects could be loaded.")
-
-    X = np.concatenate(x_blocks, axis=0)
-    dataset = LoadedDataset(
-        X=X,
-        y=np.concatenate(y_blocks, axis=0),
-        subjects=np.array(subj_blocks, dtype=object),
-        channel_names=common_ch_names or [],
-        times=np.asarray(times, dtype=np.float32),
-        skipped=skipped,
-        sfreq=sfreq,
-        chs_info=common_chs_info,
-        info=common_info,
+    selected_task = task.with_window(analysis_window)
+    preset = PreprocessingPreset(
+        id="raw_epochs",
+        picks=tuple(spec.picks) if spec.picks is not None else None,
+        bandpass=spec.bandpass,
+        resample_sfreq=spec.resample_sfreq,
     )
-    if verbose:
-        print(f"Total samples: {len(dataset.y)} | {task.class_0}={(dataset.y == 0).sum()} | {task.class_1}={(dataset.y == 1).sum()}")
-        print(f"Loaded subjects: {len(np.unique(dataset.subjects))} | Channels: {len(dataset.channel_names)}")
-        if skipped:
-            print("Skipped:")
-            for message in skipped:
-                print(f"  {message}")
-
-    # Cache preprocessed dataset to disk
-    try:
-        paths.cache_dir.mkdir(parents=True, exist_ok=True)
-        joblib.dump(dataset, cache_path)
-        if verbose:
-            print(f"Saved preprocessed dataset to cache: {cache_path}")
-    except Exception as e:
-        if verbose:
-            print(f"Failed to cache dataset. Error: {e}")
-
-    return dataset
+    dataset = load_epoch_dataset(paths, selected_task, preset, verbose=verbose)
+    return LoadedDataset(
+        X=dataset.X,
+        y=dataset.y,
+        subjects=dataset.subjects,
+        channel_names=dataset.channel_names,
+        times=dataset.times,
+        skipped=dataset.skipped,
+        sfreq=dataset.sfreq,
+        chs_info=[dict(channel) for channel in dataset.info["chs"]] if dataset.info is not None else None,
+        info=dataset.info,
+        trial_indices=dataset.trial_indices,
+        class_ids=dataset.class_ids,
+    )
 
 
 def temporal_band_features(
@@ -166,12 +65,6 @@ def temporal_band_features(
     mode: str = "de",
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Return graph node features with shape (trials, windows, channels, bands)."""
-    from scipy.signal import welch
-    try:
-        from scipy.integrate import trapezoid
-    except ImportError:
-        from scipy.integrate import trapz as trapezoid
-
     n_trials, n_channels, n_times = X.shape
     win_samples = max(4, int(round(window_sec * sfreq)))
     step_samples = max(1, int(round(step_sec * sfreq)))

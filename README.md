@@ -1,234 +1,226 @@
-# AI For Cognition: Decoding Cogntivie Conflict and Conscious Perception from EEG Signals in Binocular Rivalry
+<div align="center">
 
-This repository contains the source code, analysis pipelines, and Jupyter notebooks for the **Treball de Fi de Grau (TFG)** investigating the neural mechanisms of cognitive conflict and attention in **Binocular Rivalry (BR)** using Electroencephalography (EEG) and Machine/Deep Learning classifiers.
+# Can we read perceptual conflict from a single EEG trial?
 
-📄 **[Final Thesis Report: AI for Cognition: Decoding Cognitive Conflict and Conscious Perception from EEG Signals in Binocular Rivalry](TFG.pdf)**
+**Artificial Intelligence for Cognition: Decoding Cognitive Conflict and Conscious Perception from EEG**
 
-The project builds upon the theoretical framework of conflict monitoring and cognitive control, validating findings from the accompanying research article:  
-📄 **[Drew et al., 2026 - Binocular Rivalry: Evaluating the Role of Theta Power as a Neural Index of Conflict](https://onlinelibrary.wiley.com/doi/10.1111/ejn.70372)**.
+Bachelor's thesis · Artificial Intelligence degree · FIB, Universitat Politècnica de Catalunya · June 2026<br>
+Nils Durán Laplaza · supervised by Adrià Tauste and Mireia Torralba
 
-## 💾 Dataset Access
+[📄 Read the thesis](TFG.pdf) · [🎬 Watch the explainer video](media/videos/br/1080p60/BinocularRivalryEnglish.mp4) · [🛠️ Usage guide](docs/usage.md)
 
-The raw and preprocessed EEG dataset used in this project, introduced by Drew, Torralba, et al., is publicly available on the Open Science Framework (OSF):
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
+![MNE](https://img.shields.io/badge/MNE-1.10-1f6feb)
+![PyTorch](https://img.shields.io/badge/PyTorch-optional-EE4C2C?logo=pytorch&logoColor=white)
+![tests](https://img.shields.io/badge/tests-78%20passing-2ea44f)
 
-🔗 **[Dataset & Analysis Code on OSF (https://osf.io/f9gez)](https://osf.io/f9gez)**
+</div>
 
 ---
 
-## 📊 Project Overview & Paradigm
+Show your left eye a **red** disc and your right eye a **green** one, and your brain does not see a
+neat yellow blend. It *picks*: you see red, then green, or a patchy mix of the two. This is
+**binocular rivalry**. The image on the retina stays the same while conscious perception changes,
+which makes it a useful window into how the brain settles a conflict between its inputs.
 
-Binocular rivalry (BR) occurs when incompatible images are presented simultaneously to each eye. Rather than merging them into a single 3D scene, the brain undergoes stochastic switches between perceiving one image, the other, or a piecemeal blend (mixed percept) of both. It has been hypothesized that this interocular competition engages the brain's cognitive conflict monitoring system, centered in the **Anterior Cingulate Cortex (ACC)** and reflected by **fronto-medial (fm) theta power (5–7 Hz)**, while the subsequent attentional adjustment and suppression of the rival eye is mediated by **parieto-occipital (po) alpha power (8–12 Hz)**.
+This thesis asks whether that conflict leaves a trace that a machine-learning model can detect
+**in a single 1.5-second EEG trial**, without averaging hundreds of trials first.
 
-To rule out confounding motor preparation and introspection signals associated with continuous reporting protocols, this study utilizes an **Onset Rivalry Protocol** which separates the stimulus perception from the motor report:
+<p align="center">
+  <img src="docs/images/BinocularRivalry0690.png" width="560" alt="Congruent trials show the same colour to both eyes; incongruent trials show red to one eye and green to the other.">
+</p>
 
-```mermaid
-graph TD
-    A[Blank Screen<br>1250ms ± 250ms] --> B[Ramp Up / Fade In<br>240ms]
-    B --> C[Stimulus Presentation<br>1500ms]
-    C --> D[Blank Screen Jitter<br>600ms ± 100ms]
-    D --> E[Perceptual Response Screen<br>Pure Red vs. Mixed vs. Pure Green]
-    
-    style C fill:#f9f,stroke:#333,stroke-width:2px
-    style E fill:#bbf,stroke:#333,stroke-width:2px
+## TL;DR
+
+| | |
+|---|---|
+| 🧠 **Data** | 47 participants, 60-channel EEG at 500 Hz, about 22,800 onset-rivalry trials ([Drew et al., 2026](https://doi.org/10.1111/ejn.70372); [open data on OSF](https://osf.io/f9gez/overview)) |
+| 🎯 **Main result** | Single-trial EEG separates **congruent from conflicting** stimulation above chance. Best model: **Riemannian covariance + LDA, 58.7 % balanced accuracy** on a held-out final 20 % of each session |
+| 🌀 **Harder question** | Telling **mixed from single-colour** percepts during conflict stays close to chance (best 52.7 %). Treated as exploratory |
+| 🏗️ **Model lesson** | Bigger is not better here. A covariance matrix and a linear classifier match or beat EEGNet, a graph neural network and two pretrained EEG foundation models |
+| 🔬 **Neuroscience** | Replicates the **posterior alpha** effect of the original study and extends 1-D temporal clusters to **2-D channel × time clusters** |
+| 🔐 **Privacy** | The same recordings identify *who* the participant is with **>98 % accuracy**, so EEG should be handled as biometric data |
+
+## The experiment
+
+Participants looked through a mirror stereoscope, so each eye received its own image. On every
+trial a red or green Gabor disc faded in and stayed on screen for 1.5 s. Only after it disappeared
+did the participant report what they saw: **red**, **green** or **mixed**.
+
+<p align="center">
+  <img src="docs/images/experimental_paradigm.png" width="720" alt="Trial timeline: blank screen, 240 ms ramp-up, 1500 ms stimulus, blank, then response screen with red, mixed and green options.">
+  <br><sub>Trial structure of the onset-rivalry task (figure from Drew et al., 2026).</sub>
+</p>
+
+Combining what was **shown** with what was **reported** gives three labels and two questions:
+
+| Label | Stimulus | Report | | Task | Question |
+|---|---|---|---|---|---|
+| **C** · Congruent | same colour in both eyes | one colour | | **C vs IP** | Does the EEG know there was a conflict, even when the report looks the same? |
+| **IP** · Incongruent-Pure | different colours | one colour | | **IM vs IP** | Given a conflict, can the EEG predict how it was resolved? |
+| **IM** · Incongruent-Mixed | different colours | mixed | | | |
+
+**C vs IP** is the cleaner test. Both classes end in the same kind of report, so a decoder cannot win
+by detecting "the participant pressed the *mixed* button". Only the presence of interocular conflict
+differs.
+
+## Results
+
+### 1 · Replication: the alpha effect is there
+
+Power in the parieto-occipital **alpha band (8–12 Hz)** stays more suppressed after conflicting
+stimuli than after congruent ones, from about 450 ms until the stimulus ends. This matches the
+original paper. The fronto-medial **theta** effect is weaker and depends more on the analysis choices.
+
+<p align="center">
+  <img src="docs/images/timecourse_v1_rep_c_vs_ip_alpha.png" width="560" alt="Alpha power time course: congruent and incongruent-pure trials diverge after about 450 ms, with a significant cluster until 1400 ms.">
+</p>
+
+### 2 · From time courses to channel × time clusters
+
+Instead of fixing a region of interest in advance, cluster-based permutation tests run over **all
+channels and time points**, with family-wise error control. The C vs IP alpha effect grows into a
+broad posterior cluster (*p*<sub>FWER</sub> = 0.001). The IM vs IP clusters are weaker and less
+stable across subjects, as measured by subject-to-group Jaccard divergence.
+
+<p align="center">
+  <img src="docs/images/clustering_topomaps.png" width="820" alt="Topographic t-value maps over time for theta and alpha in both tasks; the C vs IP alpha row shows a large significant posterior cluster from 500 to 1300 ms.">
+</p>
+
+### 3 · Single-trial decoding: ten models, one honest split
+
+Every model is trained per subject on the **first 80 % of the session**, with hyperparameters chosen
+by blocked, grouped cross-validation inside that period. Each model is then scored **once** on the
+**final 20 %**, which no model sees before that point. Classes are balanced inside training folds
+and all metrics are balanced accuracy, so 50 % is chance.
+
+<p align="center">
+  <img src="docs/images/readme/decoding_results.png" width="820" alt="Dot plot of balanced accuracy for ten models on both tasks. Riemannian covariance plus LDA reaches 58.7 percent on C vs IP; IM vs IP stays near 50 percent for all models.">
+</p>
+
+<details>
+<summary><b>Table of the same numbers</b></summary>
+
+| Model | C vs IP | IM vs IP |
+|---|---:|---:|
+| Logistic regression, FCz theta | 49.6 ± 6.7 | 50.6 ± 8.6 |
+| Logistic regression, Oz alpha | 53.6 ± 8.2 | 49.4 ± 8.0 |
+| **Riemannian covariance + LDA** | **58.7 ± 8.3** | 49.3 ± 6.1 |
+| Experiment-guided classical ML | 56.9 ± 8.1 | 50.9 ± 8.1 |
+| SVC, cluster features | 56.2 ± 6.3 | **52.7 ± 6.2** |
+| EEGNet, agnostic | 53.2 ± 8.2 | 49.5 ± 5.8 |
+| EEGNet, cluster-restricted | 49.6 ± 8.0 | 48.5 ± 7.5 |
+| ST-GNN | 52.0 ± 7.3 | 51.4 ± 5.6 |
+| ST-EEGFormer (pretrained) | 52.5 ± 8.3 | 50.7 ± 5.8 |
+| LaBraM (pretrained) | 51.9 ± 6.8 | 48.2 ± 9.6 |
+
+Balanced accuracy (%) on the final chronological holdout, mean ± SD across subjects.
+
+</details>
+
+**Why does a decade-old covariance model beat transformers?** The effect is weak, spread across many
+channels and different from subject to subject, and each subject contributes only a few hundred
+trials. A shrinkage-regularised covariance matrix projected to the Riemannian tangent space keeps
+exactly that distributed cross-channel structure with very few parameters. The larger models have
+more capacity than the data can constrain. The cluster-based SVC result also needs a caveat: the
+clusters were found on the same data, so its score may be optimistic.
+
+### 4 · What do the models look at?
+
+SHAP attributions, computed only on held-out trials, show that the stronger classical models focus
+on **posterior and frontal sites**, in line with the alpha and theta literature. Most deep models
+spread their importance across the whole scalp.
+
+<p align="center">
+  <img src="docs/images/shared_cohort_spatial_topomaps_c_vs_ip.png" width="820" alt="Spatial importance maps for all ten models on C vs IP.">
+</p>
+
+### 5 · A privacy warning
+
+A subject-identification control, using the same pipeline with participant identity as the label,
+recognises the participant from a held-out trial with **more than 98 % accuracy**. EEG carries a
+strong personal fingerprint. This is also why random trial-level splits are dangerous: a model can
+score well by recognising the person or the session instead of the condition.
+
+## Takeaways
+
+> **Science:** conflict-related perceptual information *is* present in single-trial scalp EEG, but it
+> is subtle, distributed and sensitive to how it is validated.
+>
+> **Method:** for small, noisy, subject-specific EEG datasets, a model whose assumptions fit EEG
+> (covariance geometry, compact EEG-specific convolutions) matters more than model size.
+> Preprocessing, representation and an honest validation split matter as much as the architecture.
+
+## After the thesis: a stricter re-analysis
+
+The code in this repository was refactored after submission to remove the remaining analyst degrees
+of freedom.
+
+- **All 47 subjects** are included. There is no effect-size-based subject selection and no
+  undersampling.
+- Every model goes through **one shared preprocessing cache, split protocol and artifact format**.
+- **Four extra tasks** are added (three-class C/IP/IM, red vs green, and more), together with
+  **temporal decoding onset** using max-T correction and holdout confirmation, and **inter-subject
+  transfer** with Euclidean Alignment.
+
+Under this stricter protocol, Riemannian TS-LDA still leads C vs IP with **55.0 ± 8.3 %**, and EEGNet
+is close behind at 54.9 %. IM vs IP stays at chance for every model. The ranking holds and the
+effect is smaller, which is expected once the subject selection used in the thesis is removed.
+
+## Repository layout
+
+```text
+src/br_analysis/        Python package: data loading, preprocessing, tasks, models, runners,
+                        statistics (clustering, temporal onset), SHAP, reports and CLI
+  runners/              shared training loops for classical and PyTorch models
+src/notebooks/          12 narrative notebooks (EDA → clustering → models → explainability → report)
+tests/                  78 pytest tests (leakage-safe splits, metrics, runners, caches, CLI)
+animations/             Manim scenes behind the explainer video
+docs/images/            figures used in the thesis and this README
+docs/usage.md           full technical guide: CLI, caches, Kaggle GPU runs, artifact format
+TFG.pdf                 the thesis
 ```
 
-### Key Experimental Conditions & Percepts
-1. **Congruent Stimuli (C)**: Identical stimuli shown to both eyes (no interocular conflict). Subject reports a **Pure Percept**.
-2. **Incongruent Stimuli**: Mutually incompatible stimuli shown to each eye (interocular conflict).
-   - **Incongruent Pure (IP)**: Subject reports a **Pure Percept** (indicating successful resolution of the physical conflict).
-   - **Incongruent Mixed (IM)**: Subject reports a **Mixed/Piecemeal Percept** (indicating incomplete or transitioning conflict resolution).
+## Quick start
 
-### Decoding Tasks
-- **Task 1: Congruent vs. Incongruent Pure ($C\text{ vs. }IP$)**: Evaluates conflict monitoring per se. Because both conditions result in the same subjective experience (a pure percept), any differences in neural activity reflect the resolution of physical interocular conflict.
-- **Task 2: Incongruent Mixed vs. Incongruent Pure ($IM\text{ vs. }IP$)**: Investigates the neural correlates of successful conflict resolution versus unstable rivalry dynamics.
-
----
-
-## 📈 Scientific Findings Summary
-
-### 1. Spatiotemporal Clustering & Replication
-* **Posterior Alpha vs. Fronto-Medial Theta**: The project partially replicates previous findings, but shows that the parieto-occipital alpha effect for C vs IP is the most robust and reproducible pattern across a broad post-stimulus interval. In contrast, fronto-medial theta effects are more fragile and sensitive to spatial and temporal window choices.
-* **Task Stability**: Conflict resolution dynamics (C vs IP) produce more stable spatiotemporal clusters than mixed percept dynamics (IM vs IP), which show higher subject-level variability.
-
-### 2. Single-Trial Decoding Constraints
-* **Task Decoding**: Single-trial decoding of C vs IP yields cautiously positive results with weak but structured discriminative information. In contrast, decoding IM vs IP remains largely exploratory and near chance levels across models.
-* **Model Complexity**: Increasing model complexity does not systematically improve decoding. Classical methods with strong EEG-specific inductive biases (specifically **Riemannian Covariance + LDA**) outperformed or matched complex deep learning architectures (EEGNet, ST-GNN) and large foundation models (ST-EEGFormer, LaBraM).
-
-### 3. Interpretability & Feature Relevance
-* **Distributed Information**: Above-chance decoding relies on distributed multichannel structure rather than isolated scalar power features from a single electrode.
-* **Spatial Attribution**: Model attribution analyses converge on broad posterior and central-posterior sensor relevance, supporting the conclusion that conflict-related perceptual information in this dataset is best captured by distributed posterior alpha and covariance patterns.
-
----
-
-## 🛠️ Analysis & Decoding Pipeline
-
-```mermaid
-graph TD
-    subgraph Data Loading & Preprocessing
-        A[EEG Raw Epochs .fif] --> B[Load & Balance/Undersample]
-        B --> C1[Band-Pass Envelopes & Power]
-        B --> C2[Raw Slices / Covariance Matrices]
-    end
-    
-    subgraph Decoding Models
-        C1 --> D1[Logistic Regression CV]
-        C2 --> D2[Riemannian Geometry Tangent Space + LDA]
-        C2 --> D3[Deep Learning: EEGNet / GNN / Transformer / LaBraM]
-    end
-    
-    subgraph Validation & Evaluation
-        D1 --> E[Temporal Stratified Forward-Chaining CV]
-        D2 --> E
-        D3 --> E
-        E --> F1[Permutation Tests & Null Distribution]
-        E --> F2[Scalp Topomaps & Saliency Mapping]
-        E --> F3[Accuracy Grids & Time Resolved Maps]
-    end
-    
-    style E fill:#fff2cc,stroke:#d6b656,stroke-width:2px
-    style D3 fill:#d5e8d4,stroke:#82b366,stroke-width:2px
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -e ".[deep,explain,dev]"
 ```
 
-### 📋 Detailed Model Pipelines
+Place the preprocessed epochs as `P0XX.fif` files in `data/` (the original recordings are on
+[OSF](https://osf.io/f9gez/overview)), and then run:
 
-Below is the exact data format, preprocessing steps, and classification setups for each model family in the repository:
+```powershell
+br-analysis validate-data                          # check files and event codes
+br-analysis prepare-data                           # build the shared preprocessing caches once
+br-analysis run --task c_vs_ip --model riemann     # train and evaluate one model
+br-analysis run --task all --model all --jobs 4    # fill the full task × model matrix
+br-analysis report                                 # artifacts/report/index.html
+```
 
-#### 1. Logistic Regression (LR_theta / LR_alpha)
-* **Input Data**: Raw EEG epochs in `.fif` format (24 subjects, ~200 trials/subject).
-* **Preprocessing & Feature Extraction**:
-  * **Class Balancing**: Random undersampling per subject to maintain a perfect 50/50 ratio.
-  * **Time Windowing**: Cropped time window dynamically adjusted to significant cluster activation (0.375s to 1.242s).
-  * **Bandpass Filtering**: FIR bandpass filter (`method="fir", phase="zero-double"`) applied to Theta (5–7 Hz) or Alpha (8–12 Hz) bands.
-  * **Spatial Selection**: Subset of electrodes corresponding to frontomedial theta cluster (Fz, FCz) or parieto-occipital alpha cluster.
-  * **Feature Calculation**: Average envelope amplitude (Hilbert transform) or average band power.
-  * **Feature Scaling**: `StandardScaler` (z-score over all trials/features, train-fit, test-applied).
-* **Classifier**: L2-regularized Logistic Regression (`SafeLogisticRegressionCV`) with a 3-fold cross-validation nested loop for grid-searching the regularization parameter $C$.
-* **Evaluation**: 5-fold temporal stratified cross-validation.
+Every notebook calls the same runners, so the CLI and the notebooks produce identical artifacts.
+See the **[usage guide](docs/usage.md)** for preprocessing presets, the methodology checklist,
+temporal-onset and inter-subject analyses, cloud GPU runs and the artifact format.
 
-#### 2. Riemannian Geometry (Riemann TS-LDA)
-* **Input Data**: Raw EEG epochs in `.fif` format.
-* **Preprocessing & Feature Extraction**:
-  * **Class Balancing**: Random undersampling per subject to maintain a perfect 50/50 ratio.
-  * **Time Windowing**: Cropped time window (0.375s to 1.242s).
-  * **Bandpass Filtering**: FIR bandpass filter (`method="fir", phase="zero-double"`) applied independently to Theta (5–7 Hz) and Alpha (8–12 Hz) bands.
-  * **Multi-network Fusion**: Concatenates theta cluster (2 chs) and alpha cluster (27 chs) along the channel axis.
-  * **Covariance Estimation**: Oracle Approximating Shrinkage (**OAS**) estimator to compute spatial covariance matrices per trial: $\Sigma_i \in \mathbb{R}^{C \times C}$.
-  * **Tangent Space Mapping**: Trial covariance matrices are projected onto the Riemannian Tangent Space at the geometric mean covariance point, yielding flat vector features.
-* **Classifier**: Linear Discriminant Analysis (LDA) with LSQR solver and automatic shrinkage (`shrinkage="auto"`).
-* **Evaluation**: 5-fold temporal stratified cross-validation.
+## Data and citation
 
-#### 3. EEGNet (Agnostic vs. Clustering)
-* **Input Data**: Raw EEG epochs in `.fif` format.
-* **Preprocessing & Feature Extraction**:
-  * **Class Balancing**: Random undersampling per subject to maintain a perfect 50/50 ratio.
-  * **Agnostic Config**: All 60 EEG channels; full analysis window (0.0s to 1.5s); broad IIR bandpass filter (1.0–40.0 Hz); downsampled/resampled to 128 Hz.
-  * **Clustering Config**: Data-driven theta and alpha clusters (29 electrodes); cropped analysis window; IIR bandpass filtered (theta 5-7 Hz, alpha 8-12 Hz) concatenated along the channel axis.
-  * **Standardization**: Per-trial and per-channel z-score scaling across the time dimension to ensure amplitude invariance.
-* **Model Architecture**:
-  * Temporal Conv2D (kernel length=64 for 128Hz, F1=8 filters).
-  * Spatial Depthwise Conv2D (group-convolutions with D=2 spatial filters per temporal channel).
-  * Spatiotemporal Separable Conv2D (F2=16 filters) to mix features.
-  * Average Pooling (1x8), Dropout (0.5), and Fully Connected classification head.
-* **Training & Refitting**: AdamW optimizer ($lr=1e-3$, $wd=1e-4$), CrossEntropy Loss with class weights. Trains with a 2-stage automated refit: (1) Trains with $20\%$ validation for early stopping to find $best\_epoch$, (2) resets weights and retrains on $100\%$ training data for exactly $best\_epoch$ epochs.
-* **Evaluation**: 5-fold temporal stratified cross-validation.
+The EEG data and the original analysis code come from:
 
-#### 4. Spatio-Temporal Graph Neural Network (ST-GNN)
-* **Input Data**: Raw EEG epochs in `.fif` format.
-* **Preprocessing & Feature Extraction**:
-  * **Class Balancing**: Random undersampling per subject to maintain a perfect 50/50 ratio.
-  * **Bandpass Filtering**: Broad bandpass IIR filtered (4.0–13.0 Hz, covering theta and alpha). Downsampled to 128 Hz.
-  * **Graph Node Feature Extraction**: Extracts Differential Entropy (DE) features using Welch PSD log-power over sliding temporal windows ($250\text{ ms}$ window, $50\text{ ms}$ step), producing inputs of shape `(trials, windows, channels, bands)`.
-  * **Graph Topology**: Adjacency matrix $A \in \mathbb{R}^{C \times C}$ computed via 3D electrode distance thresholding: $A_{ij} = \exp(-d(i,j)^2 / \sigma^2)$ if distance $d(i,j) < 0.35$.
-  * **Standardization**: Z-score standardized per trial, node, and feature over the window/temporal dimension.
-* **Model Architecture**:
-  * ChebConv spectral graph convolution layers to learn spatial graph structures.
-  * 1D Temporal convolution layers to capture temporal transitions.
-  * Fully connected layer with dropout.
-* **Training & Refitting**: AdamW optimizer ($lr=1e-3$), 2-stage automated refitting.
-* **Evaluation**: 5-fold temporal stratified cross-validation.
+> Drew, A., San-Segundo González, J., Soto-Faraco, S. & Torralba-Cuello, M. (2026). *Binocular Rivalry: Evaluating the Role of Theta
+> Power as a Neural Index of Conflict.* European Journal of Neuroscience, 63.
+> [doi:10.1111/ejn.70372](https://doi.org/10.1111/ejn.70372) · data: [osf.io/f9gez](https://osf.io/f9gez/overview)
 
-#### 5. Spatio-Temporal EEG Transformer (ST-EEGFormer)
-* **Input Data**: Raw EEG epochs in `.fif` format.
-* **Preprocessing & Feature Extraction**:
-  * **Class Balancing**: Random undersampling per subject.
-  * **Resampling & Filtering**: All 60 electrodes; resampled to 128 Hz; full window (0.0s to 1.5s); IIR bandpassed (1.0–40.0 Hz).
-  * **Channel Alignment**: Rearranges the 60 electrode channels to match the 1D sequential spatial layout expected by ST-EEGFormer.
-  * **Standardization**: Per-trial and per-channel Z-score scaling.
-* **Model Architecture**:
-  * Pre-trained ST-EEGFormer backbone.
-  * Low-Rank Adaptation (LoRA) injected into the attention layers to allow parameter-efficient transfer learning with small sample sizes ($r=8$, $\alpha=16$).
-  * Linear classifier head.
-* **Training & Refitting**: AdamW optimizer ($lr=1e-4$), 2-stage automated refitting.
-* **Evaluation**: 5-fold temporal stratified cross-validation.
+If you use this code, please cite the thesis:
 
-#### 6. Large Brain Model (LaBraM)
-* **Input Data**: Raw EEG epochs in `.fif` format.
-* **Preprocessing & Feature Extraction**:
-  * **Class Balancing**: Random undersampling per subject.
-  * **Resampling & Filtering**: All 60 electrodes; resampled to 128 Hz; full window (0.0s to 1.5s); IIR bandpassed (1.0–40.0 Hz).
-  * **Sequence Padding**: Edge-padded along time axis to exactly 200 samples (`patch_size=200` turns the 1.5s trial into a single temporal patch).
-  * **Standardization**: Per-trial and per-channel Z-score scaling.
-* **Model Architecture**:
-  * Pre-trained `InterpolatedLaBraM` backbone (spatial interpolation of channels, masked autoencoder pre-training).
-  * LoRA injected into attention ("attn") and MLP ("mlp") modules with high regularization ($r=2$, $\alpha=4.0$, $dropout=0.2$, $weight\_decay=1e-2$).
-  * Linear classifier head.
-* **Training & Refitting**: AdamW optimizer ($lr=3e-5$), 2-stage automated refitting.
-* **Evaluation**: 5-fold temporal stratified cross-validation.
-
----
-
-## 📂 Codebase Structure
-
-The source code is organized into a modular helper library ([src/br_analysis](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis)), utility scripts, and Jupyter notebooks.
-
-### 📓 Jupyter Notebooks (`src/notebooks/`)
-
-* **[01_exploració_dades.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/01_exploraci%C3%B3_dades.ipynb)**: Performs initial exploratory analysis of the raw/preprocessed EEG signals, checking sampling frequencies, trial durations, balance of event codes, power spectral density (PSD), and event-related potentials (ERP).
-* **[02_experiments.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/02_experiments.ipynb)**: Implements the unified, hierarchical representational testing framework (11 experiments) including preprocessing ablations, representation diagnostics, classical ML comparison, spatial filters, PLV connectivity, deep learning ablations, transfer learning, generalization tests, and subject-identification controls.
-* **[03_chance_level_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/03_chance_level_c_ip.ipynb)**: Evaluates single-channel and multi-channel band envelope classifiers on the **Congruent vs. Incongruent Pure** task. Runs an epochs grid (evaluating model accuracy as a function of the number of trials) and a time-window map, using permutation shuffles to build empirical null distributions.
-* **[04_riemann_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/04_riemann_c_ip.ipynb)**: Implements a decoding pipeline based on Riemannian geometry (covariance matrices projected onto the tangent space, classified using LDA) to distinguish **Congruent vs. Incongruent Pure** trials.
-* **[05_experiment_guided_config_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/05_experiment_guided_config_c_ip.ipynb)**: Applies the experiment-guided C vs IP configuration selected from Experiment 8, with development CV and one final holdout evaluation.
-* **[06_visualitzacions.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/06_visualitzacions.ipynb)**: Visualizes and compares the classical machine learning models' output, including subject learning curves, accuracy distributions, spatial scalp topographies, and statistical comparisons of classifier performance.
-* **[07_chance_level_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/07_chance_level_im_ip.ipynb)**: Applies the same feature-based decoding grid and permutation-testing pipeline from `03` to classify **Incongruent Mixed vs. Incongruent Pure** trials. *(Paired with `03_chance_level_c_ip.ipynb`)*.
-* **[08_riemann_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/08_riemann_im_ip.ipynb)**: Applies the same Riemannian covariance and Tangent Space LDA classification pipeline from `04` to classify **Incongruent Mixed vs. Incongruent Pure** trials. *(Paired with `04_riemann_c_ip.ipynb`)*.
-* **[09_experiment_guided_config_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/09_experiment_guided_config_im_ip.ipynb)**: Applies the experiment-guided IM vs IP configuration selected from Experiment 8, with development CV and one final holdout evaluation.
-* **[10_clustering.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/10_clustering.ipynb)**: Implements data-driven spatiotemporal clustering using cluster-based permutation testing (Maris & Oostenveld, 2007) to identify statistically robust, contiguous groups of electrodes and active time windows for C vs IP and IM vs IP tasks in both Theta and Alpha bands, providing inputs for the focused EEGNet model.
-* **[11_EEGNet_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/11_EEGNet_c_ip.ipynb)**: Builds, trains, and evaluates a 2D convolutional network (EEGNet) on the raw EEG trials for the **Congruent vs. Incongruent Pure** classification task in Agnostic and focused Clustering configurations. Features unified environment execution support.
-* **[12_ST-GNN_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/12_ST-GNN_c_ip.ipynb)**: Implements and trains a Spatio-Temporal Graph Neural Network using Chebyshev convolutions over the spatial electrode graph to decode **Congruent vs. Incongruent Pure** states. Features unified environment execution support.
-* **[13_ST-EEGFormer_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/13_ST-EEGFormer_c_ip.ipynb)**: Trains and evaluates a Spatio-Temporal Transformer (ST-EEGFormer) model with spatial and temporal self-attention to classify **Congruent vs. Incongruent Pure** trials using LoRA adapters. Features unified environment execution support.
-* **[14_LaBraM_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/14_LaBraM_c_ip.ipynb)**: Adapts and fine-tunes a Large Brain Model (LaBraM) pre-trained on massive EEG datasets, utilizing Low-Rank Adaptation (LoRA) to perform transfer learning on the **Congruent vs. Incongruent Pure** task. Features unified environment execution support.
-* **[15_cross_model_comparison_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/15_cross_model_comparison_c_ip.ipynb)**: Centralizes all cohort-wide cross-model benchmark comparisons across 8 model configurations (Logistic Regressions, Riemannian TS-LDA, EEGNet Agnostic, EEGNet Clustering, ST-GNN, ST-EEGFormer, and LaBraM). Computes global performance distributions, connected subject trajectory tracing, and pairwise Wilcoxon signed-rank significance matrix heatmaps with Benjamini-Hochberg FDR correction.
-* **[16_explainability_c_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/16_explainability_c_ip.ipynb)**: Centralizes spatial and temporal feature attribution analyses for the **Congruent vs. Incongruent Pure** task. Computes backpropagation saliency mappings and SHAP gradient explanations side-by-side for ST-GNN, ST-EEGFormer, and LaBraM.
-* **[17_EEGNet_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/17_EEGNet_im_ip.ipynb)**: Applies the EEGNet classification pipeline to decode **Incongruent Mixed vs. Incongruent Pure** trials.
-* **[18_ST-GNN_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/18_ST-GNN_im_ip.ipynb)**: Applies the Spatio-Temporal Graph Neural Network classification pipeline to decode **Incongruent Mixed vs. Incongruent Pure** trials.
-* **[19_ST-EEGFormer_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/19_ST-EEGFormer_im_ip.ipynb)**: Applies the ST-EEGFormer LoRA fine-tuning pipeline to decode **Incongruent Mixed vs. Incongruent Pure** trials.
-* **[20_LaBraM_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/20_LaBraM_im_ip.ipynb)**: Applies the LaBraM LoRA fine-tuning transfer learning pipeline to decode **Incongruent Mixed vs. Incongruent Pure** trials.
-* **[21_cross_model_comparison_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/21_cross_model_comparison_im_ip.ipynb)**: Centralizes all cohort-wide cross-model benchmark comparisons for the **Incongruent Mixed vs. Incongruent Pure** task.
-* **[22_explainability_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/22_explainability_im_ip.ipynb)**: Centralizes spatial and temporal feature attribution analyses (Saliency and SHAP) for the **Incongruent Mixed vs. Incongruent Pure** task.
-* **[23_SVC_clustering_c_ip_im_ip.ipynb](file:///c:/Users/nils/Documents/Universitat/TFG/src/notebooks/23_SVC_clustering_c_ip_im_ip.ipynb)**: Evaluates a cluster-restricted Support Vector Classifier (SVC) using features extracted from the data-driven spatiotemporal clusters for both C vs IP and IM vs IP tasks.
-
-
----
-
-### 🐍 Python Modules (`src/br_analysis/`)
-
-* **[__init__.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/__init__.py)**: Exposes public utilities, configurations, and loaders for importing into the notebooks.
-* **[config.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/config.py)**: Centralizes configuration constants, dataset directory detection, targeted channel/frequency clusters (e.g., fronto-medial theta channels, parieto-occipital alpha channels), and defines the decoding task specifications ([ProjectPaths](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/config.py#L8-L34), [BinaryTaskConfig](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/config.py#L37-L53)).
-* **[datasets.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/datasets.py)**: Handles loading, unit corrections (to Volts), filtering, and balanced class undersampling of MNE EEG epochs (`.fif` files) into structured arrays. It includes custom safeguards to copy Google Drive network-mounted data locally to prevent Windows I/O latency bottlenecks.
-* **[deep.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/deep.py)**: Provides PyTorch-specific raw EEG epoch data loading, channel resampling, and spatial distance-based adjacency matrix generation for Graph Neural Network training. *(Paired with `datasets.py`)*.
-* **[experiments.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/experiments.py)**: Houses execution routines for classical ML pipelines. It implements a custom forward-chaining cross-validation strategy ([temporal_stratified_splits](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/experiments.py#L94-L139)) to avoid temporal leakage, permutation-based surrogate null distributions, and a background thread-driven [ProgressTracker](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/experiments.py#L21-L56) showing high-resolution progress updates for parallel subject training.
-* **[explainability.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/explainability.py)**: Centralizes spatial and temporal feature attribution analyses for the deep learning models using Integrated Gradients.
-* **[features.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/features.py)**: Defines feature transformers for classical classifiers, including the [HilbertMeanEnvelope](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/features.py#L10-L17) extraction and [MeanPower](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/features.py#L20-L25).
-* **[models.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/models.py)**: Configures scikit-learn models. Features a [SafeLogisticRegressionCV](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/models.py#L13-L50) class that adjusts cross-validation splits dynamically or falls back to standard logistic regression to handle subjects with highly skewed or low trial numbers, alongside the [RiemannLdaModelFactory](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/models.py#L85-L100).
-* **[models_mae_eeg.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/models_mae_eeg.py)**: Implements the Masked Autoencoder (MAE) and Vision Transformer backbones used for EEG foundation models like LaBraM.
-* **[plotting.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/plotting.py)**: Exposes functions to plot subject-wise learning curves, aggregate classification accuracy distributions with correct fractional coordinate alignments, MNE-based spatial topomaps of model weights or saliencies, and attention heatmaps.
-* **[torch_models.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_models.py)**: Defines the deep learning architectures used for decoding. Contains [EEGNet](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_models.py#L11-L60) (a compact temporal-spatial convolutional network), [STGNNChebConv](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_models.py#L93-L135) (a Spatio-Temporal Graph Neural Network using Chebyshev convolutions), and [STEEGFormerLoRA](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_models.py#L318-L387) (a Spatio-Temporal Transformer with custom LoRA adapters).
-* **[pretrained.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/pretrained.py)**: Provides configuration specifications, pre-trained backbone loading utilities, and helper functions to inject Low-Rank Adaptation (LoRA) adapters into linear layers. *(Paired with `torch_models.py`)*.
-* **[torch_training.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/br_analysis/torch_training.py)**: Implements training and validation loops, temporal splits, model checkpointing, ROC/PR curves visualization, and classification metrics calculation for the PyTorch deep learning models.
-
----
-
-### 🎨 Manim Visualizations (`src/scripts/`)
-
-* **[br.py](file:///c:/Users/nils/Documents/Universitat/TFG/src/scripts/br.py)**: A Manim mathematical animation script which generates high-quality schematic video visualizations of the binocular rivalry trial timeline, stimulus representations (Gabor gratings, mirror goggles), congruent/incongruent setups, and pure vs. mixed percept reporting options.
-
+```bibtex
+@thesis{duran2026binocular,
+  author = {Durán Laplaza, Nils},
+  title  = {Artificial Intelligence for Cognition: Decoding Cognitive Conflict and Conscious Perception from EEG},
+  school = {Facultat d'Informàtica de Barcelona, Universitat Politècnica de Catalunya},
+  type   = {Bachelor's thesis},
+  year   = {2026},
+  url    = {https://github.com/nilsduran/TFG}
+}
+```

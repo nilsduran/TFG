@@ -1,18 +1,1 @@
-numpy
-mne
-pyriemann
-matplotlib
-seaborn
-torch
-torchvision
-torchaudio
-scikit-learn
-scipy
-pandas
-joblib
-braindecode
-safetensors
-timm
-huggingface_hub
-shap
-optuna
+-e .[deep,explain]

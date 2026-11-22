@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import math
-from typing import Callable
 
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class EEGNet(nn.Module):
@@ -170,7 +169,7 @@ class LoRALinear(nn.Module):
         r: int = 0,
         alpha: float = 1.0,
         dropout: float = 0.0,
-    ) -> "LoRALinear":
+    ) -> LoRALinear:
         layer = cls(
             linear.in_features,
             linear.out_features,
@@ -212,83 +211,6 @@ class LoRALinear(nn.Module):
         if self.r > 0:
             out = out + self.lora_b(self.lora_a(self.dropout(x))) * self.scaling
         return out
-
-
-class LoRAMultiheadSelfAttention(nn.Module):
-    """Batch-first self-attention with LoRA on q and v projections."""
-
-    def __init__(
-        self,
-        embed_dim: int,
-        num_heads: int,
-        *,
-        dropout: float = 0.0,
-        lora_r: int = 0,
-        lora_alpha: float = 1.0,
-        lora_dropout: float = 0.0,
-    ) -> None:
-        super().__init__()
-        if embed_dim % num_heads != 0:
-            raise ValueError("embed_dim must be divisible by num_heads")
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
-        self.q_proj = LoRALinear(embed_dim, embed_dim, r=lora_r, alpha=lora_alpha, dropout=lora_dropout)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = LoRALinear(embed_dim, embed_dim, r=lora_r, alpha=lora_alpha, dropout=lora_dropout)
-        self.out_proj = nn.Linear(embed_dim, embed_dim)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        batch, tokens, _ = x.shape
-        q = self.q_proj(x).reshape(batch, tokens, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(x).reshape(batch, tokens, self.num_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(x).reshape(batch, tokens, self.num_heads, self.head_dim).transpose(1, 2)
-        out = F.scaled_dot_product_attention(
-            q, k, v,
-            dropout_p=self.dropout.p if self.training else 0.0,
-            is_causal=False
-        )
-        out = out.transpose(1, 2).reshape(batch, tokens, self.embed_dim)
-        return self.out_proj(out)
-
-
-class LoRATransformerBlock(nn.Module):
-    def __init__(
-        self,
-        embed_dim: int,
-        num_heads: int,
-        *,
-        mlp_ratio: float = 4.0,
-        dropout: float = 0.1,
-        lora_r: int = 0,
-        lora_alpha: float = 1.0,
-        lora_dropout: float = 0.0,
-    ) -> None:
-        super().__init__()
-        self.norm1 = nn.LayerNorm(embed_dim)
-        self.attn = LoRAMultiheadSelfAttention(
-            embed_dim,
-            num_heads,
-            dropout=dropout,
-            lora_r=lora_r,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-        )
-        self.norm2 = nn.LayerNorm(embed_dim)
-        hidden = int(embed_dim * mlp_ratio)
-        self.mlp = nn.Sequential(
-            nn.Linear(embed_dim, hidden),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, embed_dim),
-            nn.Dropout(dropout),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x))
-        x = x + self.mlp(self.norm2(x))
-        return x
 
 
 def freeze_non_lora_parameters(
@@ -341,168 +263,3 @@ def inject_lora_into_linears(
 
     recurse(model)
     return model
-
-
-def count_trainable_parameters(model: nn.Module) -> tuple[int, int]:
-    total = sum(p.numel() for p in model.parameters())
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    return trainable, total
-
-
-class STEEGFormerLoRA(nn.Module):
-    """Spatio-temporal EEG Transformer with LoRA adapters.
-
-    Input shape: (batch, channels, times). The model creates temporal patches per
-    channel, adds channel/time embeddings, then applies transformer blocks.
-    """
-
-    def __init__(
-        self,
-        n_channels: int,
-        n_times: int,
-        n_classes: int = 2,
-        patch_size: int = 32,
-        patch_stride: int = 16,
-        embed_dim: int = 128,
-        depth: int = 4,
-        num_heads: int = 4,
-        mlp_ratio: float = 4.0,
-        dropout: float = 0.1,
-        lora_r: int = 8,
-        lora_alpha: float = 16.0,
-        lora_dropout: float = 0.05,
-        freeze_base: bool = True,
-    ) -> None:
-        super().__init__()
-        self.n_channels = n_channels
-        self.n_chans = n_channels
-        self.n_times = n_times
-        self.patch_size = patch_size
-        self.patch_stride = patch_stride
-        self.patch_embed = nn.Conv1d(1, embed_dim, kernel_size=patch_size, stride=patch_stride)
-        n_patches = 1 + max(0, (n_times - patch_size) // patch_stride)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.channel_embed = nn.Parameter(torch.zeros(1, n_channels, 1, embed_dim))
-        self.time_embed = nn.Parameter(torch.zeros(1, 1, n_patches, embed_dim))
-        self.pos_drop = nn.Dropout(dropout)
-        self.blocks = nn.ModuleList(
-            [
-                LoRATransformerBlock(
-                    embed_dim,
-                    num_heads,
-                    mlp_ratio=mlp_ratio,
-                    dropout=dropout,
-                    lora_r=lora_r,
-                    lora_alpha=lora_alpha,
-                    lora_dropout=lora_dropout,
-                )
-                for _ in range(depth)
-            ]
-        )
-        self.norm = nn.LayerNorm(embed_dim)
-        self.classifier = nn.Linear(embed_dim, n_classes)
-        nn.init.trunc_normal_(self.cls_token, std=0.02)
-        nn.init.trunc_normal_(self.channel_embed, std=0.02)
-        nn.init.trunc_normal_(self.time_embed, std=0.02)
-        if freeze_base:
-            freeze_non_lora_parameters(self)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        batch, channels, times = x.shape
-        x = x.reshape(batch * channels, 1, times)
-        tokens = self.patch_embed(x).transpose(1, 2)
-        n_patches = tokens.shape[1]
-        tokens = tokens.reshape(batch, channels, n_patches, -1)
-        tokens = tokens + self.channel_embed[:, :channels, :, :] + self.time_embed[:, :, :n_patches, :]
-        tokens = tokens.reshape(batch, channels * n_patches, -1)
-        cls = self.cls_token.expand(batch, -1, -1)
-        x = self.pos_drop(torch.cat([cls, tokens], dim=1))
-        for block in self.blocks:
-            x = block(x)
-        x = self.norm(x[:, 0])
-        return self.classifier(x)
-
-
-class LaBraMPPLoRA(nn.Module):
-    """LaBraM++-style channel-aware EEG patch transformer with LoRA.
-
-    This implementation provides the downstream adaptation shape: neural patch
-    tokenizer, channel/time embeddings, transformer encoder, and binary head.
-    Pretrained LaBraM++ weights can later be loaded into matching components.
-    """
-
-    def __init__(
-        self,
-        n_channels: int,
-        n_times: int,
-        n_classes: int = 2,
-        patch_size: int = 64,
-        patch_stride: int = 32,
-        embed_dim: int = 200,
-        depth: int = 6,
-        num_heads: int = 5,
-        mlp_ratio: float = 4.0,
-        dropout: float = 0.1,
-        lora_r: int = 8,
-        lora_alpha: float = 16.0,
-        lora_dropout: float = 0.05,
-        freeze_base: bool = True,
-    ) -> None:
-        super().__init__()
-        self.n_channels = n_channels
-        self.n_chans = n_channels
-        self.n_times = n_times
-        self.patch_size = patch_size
-        self.patch_stride = patch_stride
-        self.tokenizer = nn.Sequential(
-            nn.Conv1d(1, embed_dim // 2, kernel_size=patch_size // 2, stride=max(1, patch_size // 4), padding=patch_size // 4),
-            nn.GELU(),
-            nn.Conv1d(embed_dim // 2, embed_dim, kernel_size=3, stride=2, padding=1),
-            nn.GELU(),
-        )
-        with torch.no_grad():
-            dummy = torch.zeros(1, 1, n_times)
-            n_patches = self.tokenizer(dummy).shape[-1]
-        self.summary_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.channel_embed = nn.Parameter(torch.zeros(1, n_channels, 1, embed_dim))
-        self.time_embed = nn.Parameter(torch.zeros(1, 1, n_patches, embed_dim))
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.blocks = nn.ModuleList(
-            [
-                LoRATransformerBlock(
-                    embed_dim,
-                    num_heads,
-                    mlp_ratio=mlp_ratio,
-                    dropout=dropout,
-                    lora_r=lora_r,
-                    lora_alpha=lora_alpha,
-                    lora_dropout=lora_dropout,
-                )
-                for _ in range(depth)
-            ]
-        )
-        self.norm = nn.LayerNorm(embed_dim)
-        self.head = nn.Sequential(nn.Dropout(dropout), nn.Linear(embed_dim, n_classes))
-        nn.init.trunc_normal_(self.summary_token, std=0.02)
-        nn.init.trunc_normal_(self.channel_embed, std=0.02)
-        nn.init.trunc_normal_(self.time_embed, std=0.02)
-        nn.init.trunc_normal_(self.mask_token, std=0.02)
-        if freeze_base:
-            freeze_non_lora_parameters(self)
-
-    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
-        batch, channels, times = x.shape
-        x = x.reshape(batch * channels, 1, times)
-        tokens = self.tokenizer(x).transpose(1, 2)
-        n_patches = tokens.shape[1]
-        tokens = tokens.reshape(batch, channels, n_patches, -1)
-        tokens = tokens + self.channel_embed[:, :channels, :, :] + self.time_embed[:, :, :n_patches, :]
-        tokens = tokens.reshape(batch, channels * n_patches, -1)
-        summary = self.summary_token.expand(batch, -1, -1)
-        x = torch.cat([summary, tokens], dim=1)
-        for block in self.blocks:
-            x = block(x)
-        return self.norm(x[:, 0])
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.head(self.forward_features(x))

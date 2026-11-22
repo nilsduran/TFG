@@ -1,5 +1,0 @@
-{
-  "extensions": [".ipynb", ".py"],
-  "files": [],
-  "ignored_files": ["utils.py", "secrets.py"]
-}
