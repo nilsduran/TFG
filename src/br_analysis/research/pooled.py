@@ -22,6 +22,7 @@ from joblib import Parallel, delayed
 from scipy.linalg import fractional_matrix_power
 from sklearn.base import clone
 from sklearn.metrics import roc_auc_score
+from sklearn.pipeline import Pipeline
 from threadpoolctl import threadpool_limits
 
 from ..splits import SplitPlan, development_splits
@@ -51,13 +52,26 @@ def _fit_predict(estimator, X_train, y_train, X_test):
     return aligned
 
 
-def _evaluate_target(estimator, X_sources, y_sources, X_target, y_target, target_repeat, plan):
+def split_stateless_head(estimator):
+    """Split off a leading per-trial covariance step so it can be computed once per trial.
+
+    Pooled training otherwise copies ~13k raw epochs per target and per worker, which
+    exhausts memory; covariance matrices are ~3x smaller and need computing only once.
+    """
+    if isinstance(estimator, Pipeline) and type(estimator.steps[0][1]).__name__ == "Covariances":
+        return estimator.steps[0][1], Pipeline(estimator.steps[1:])
+    return None, estimator
+
+
+def _evaluate_target(estimator, X_sources, y_sources, X_target, y_target, target_repeat, plan, head=None):
     splits, holdout = development_splits(y_target, plan)
     if not splits or len(np.unique(y_target[holdout])) < 2:
         return None
     n_dev = len(y_target) - len(holdout)
     reference = ea_reference(X_target[:n_dev])  # unsupervised, development trials only
     X_aligned = ea_align(X_target, reference)
+    if head is not None:
+        X_aligned = head.transform(X_aligned)
 
     def train_and_predict(train_idx, test_idx):
         X_train = np.concatenate([X_sources] + [X_aligned[train_idx]] * target_repeat)
@@ -108,7 +122,9 @@ def run_pooled(
     for subject in subjects:
         mask = dataset.subjects == subject
         aligned[subject] = ea_align(X_all[mask], ea_reference(X_all[mask]))
-    estimator = candidate.build(dataset.sfreq)
+    head, estimator = split_stateless_head(candidate.build(dataset.sfreq))
+    if head is not None:
+        aligned = {s: head.transform(X).astype(np.float32) for s, X in aligned.items()}
 
     def job(target):
         sources = [s for s in subjects if s != target]
@@ -116,7 +132,7 @@ def run_pooled(
         y_sources = np.concatenate([y_all[dataset.subjects == s] for s in sources])
         mask = dataset.subjects == target
         return target, _evaluate_target(
-            estimator, X_sources, y_sources, X_all[mask], y_all[mask], target_repeat, plan
+            estimator, X_sources, y_sources, X_all[mask], y_all[mask], target_repeat, plan, head
         )
 
     results = Parallel(n_jobs=n_jobs, prefer="threads")(delayed(job)(s) for s in subjects)

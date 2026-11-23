@@ -67,25 +67,77 @@ significativa, ni els profunds. Diagnòstics:
    l'estímul, que hem deixat fora de l'abast. Si hi ha senyal dins l'estímul, ha de ser
    feble i primerenc.
 
-## 3. Següent pas: cribratge ampli a GPU
+## 3. Cribratge a GPU (successive halving, ~40 configuracions per tasca)
 
-`gpu/kaggle_screen.ipynb` prova unes 40 configuracions per tasca (arquitectures, filtres,
-finestres, canals, alineament, augmentació, optimització i multitasca) amb eliminació
-progressiva:
+`gpu/kaggle_screen.ipynb` canvia una sola cosa cada vegada respecte d'EEGNet + EA +
+augmentació:
 
-- Les rondes eliminatòries fan servir només validació, que durant el cribratge s'amplia
-  al 25 % final del desenvolupament.
-- Les combinacions de millores es generen automàticament.
-- Els 3 finalistes de cada tasca, i el seu ensemble, passen el protocol complet amb
-  holdout.
+- 16 arquitectures;
+- filtres i resolució;
+- 5 finestres dins l'estímul;
+- només canals posteriors, i sense EA;
+- augmentació, mixup, label smoothing i optimització;
+- multitasca amb la tercera classe.
 
-Les instruccions són a `gpu/README.md`.
+Les rondes eliminatòries fan servir només validació, que durant el cribratge és el 25 %
+final del desenvolupament. Els 3 finalistes de cada tasca, i el seu ensemble, passen el
+protocol complet. Ha trigat 1,6 h (C vs IP) i 1,1 h (IM vs IP), en paral·lel. Cap
+configuració ha fallat.
 
-## 4. Pendent
+### C vs IP: una millora més, la multitasca
 
-- Entrenament conjunt clàssic (Riemann i ERP-LDA amb EA), en curs en local. Dirà quina
-  part del guany ve de l'entrenament conjunt i quina de la xarxa neuronal.
-- Importar i analitzar el cribratge: prevalença, comparació aparellada i, si cal, una
-  segona ronda centrada en el que funcioni.
-- Si cap direcció mou IM vs IP, documentar-ho com a resultat negatiu robust: s'han provat
-  més de 40 configuracions i 15 arquitectures.
+| Model (holdout, 46 subjectes) | Bal. acc. | AUC | vs Riemann | vs EEGNet conjunt |
+|---|---:|---:|---:|---:|
+| Riemann per subjecte (TFG) | 0,551 | 0,620 | — | — |
+| EEGNet conjunt (1a tanda) | 0,622 | 0,669 | +0,071 (p = 0,0003) | — |
+| **EEGNet + 3a classe IM (`aux3`)** | **0,641** | **0,697** | **+0,089 (p < 0,0001)** | +0,019 (p = 0,12) |
+| CTNet + 3a classe IM | 0,632 | 0,689 | +0,081 (p < 0,0001) | +0,010 |
+| **Ensemble de finalistes (escollits a validació)** | **0,646** | **0,699** | **+0,095 (p < 0,0001)** | +0,024 (p = 0,055) |
+
+- **Multitasca.** L'única millora que supera la base de manera consistent és afegir els
+  trials IM com a tercera classe d'entrenament (més dades i més estructura). És coherent
+  en validació (+0,012 d'AUC amb 3 llavors) i en holdout (+1,9 punts).
+- **Negatius robustos, que perden ≥0,03 d'AUC de validació:**
+  - escurçar la finestra, perquè l'efecte d'alfa és tardà i cal tota la finestra de 0–1,5 s;
+  - treure el passa-alt d'1 Hz;
+  - un learning rate més baix;
+  - baixar a 64 Hz;
+  - ATCNet, Deep4, SCCNet, Shallow, EEGSimpleConv i Conformer.
+- **Neutres** (dins el soroll entre llavors, SD ≈ 0,014): canals posteriors, 250 Hz,
+  weight decay, mixup, mida del batch i sense EA. En aquest darrer cas l'AUC és igual però
+  la balanced accuracy baixa.
+- **Prevalença:** l'estadístic mínim d'Allefeld continua donant γ0 = 0, perquè amb uns 60
+  trials de holdout per subjecte és massa conservador. La prova de grup (mitjana > 0,5, i
+  millora aparellada) és clarament significativa.
+
+### IM vs IP: resultat negatiu robust
+
+- **Ronda 1:** totes les configuracions queden entre 0,46 i 0,54 d'AUC de validació.
+- **Ronda 2:** les millors tornen cap a 0,50–0,52 amb més llavors, l'efecte típic de
+  regressió a la mitjana.
+- **Holdout dels finalistes:** canals posteriors 0,497, passa-baix 15 Hz 0,503, EEG-TCNet
+  0,510 i ensemble 0,509. Cap no supera Riemann (0,499) ni el que s'esperaria per atzar.
+- **La multitasca no ajuda:** afegir C com a tercera classe empitjora el resultat (−0,016
+  d'AUC).
+
+Amb 16 arquitectures, 5 finestres i totes les variants de pipeline, **dins la finestra
+d'estímul no hi ha senyal descodificable de com es resol el conflicte**, almenys amb
+aquestes dades i aquesta mida mostral. És coherent amb la literatura: el resultat
+perceptiu de la rivalitat depèn sobretot de l'estat previ a l'estímul, que queda fora de
+l'abast.
+
+## 4. Recomanacions
+
+1. **C vs IP:**
+   - El model de referència nou és EEGNet + EA + multitasca amb 3 classes: **64 %**, contra
+     el 55 % del TFG.
+   - Marge restant: una tanda final amb un ensemble divers (EEGNet-aux3, CTNet-aux3,
+     EEG-Inception, EEGNeX), 5 llavors i reentrenament amb tot el desenvolupament (no
+     només el 70 %). Previsiblement afegiria +0,5–1,5 punts.
+   - A partir d'aquí el límit és el soroll de mostreig d'uns 60 trials de holdout per
+     subjecte, no el model.
+2. **IM vs IP:** no val la pena gastar més GPU dins la finestra d'estímul. Si interessa
+   continuar, cal canviar la pregunta:
+   - incloure el pre-estímul;
+   - o analitzar les diferències individuals en la taxa de respostes "mixed", que va del
+     19 % al 92 % segons el subjecte.
