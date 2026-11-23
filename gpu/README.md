@@ -1,74 +1,83 @@
 # Experiments de GPU a Kaggle (pas a pas)
 
-Els models profunds (EEGNet, EEGNeX, EEG-Inception, ShallowNet i **CBraMod preentrenat**)
-s'entrenen amb **tots els subjectes alhora**. Cada subjecte s'alinea amb Euclidean
-Alignment, i després el model s'ajusta a cada subjecte. En CPU això trigaria dies;
-en una GPU gratuïta de Kaggle, unes 5–7 hores per a les dues tasques.
+Hi ha dos notebooks. Tots dos fan servir el mateix dataset privat de Kaggle (`c_vs_ip.npz`,
+`im_vs_ip.npz`):
 
-El protocol és el mateix que el del benchmark local: el 20 % final de cada subjecte no
-es toca fins a la puntuació final.
+| Notebook | Què fa | Durada |
+|---|---|---|
+| `kaggle_screen.ipynb` | **Cribratge** ("spaghetti at the wall"): ~40 configuracions per tasca, amb eliminació progressiva i una GPU per tasca | 6–10 h |
+| `kaggle_notebook.ipynb` | Suite fixa de 5 models (la primera tanda, ja feta) | 3–4 h |
 
-## 1. Preparar les dades (al teu ordinador, ~2 min)
+El protocol és el mateix que el del benchmark local: el 20 % final de cada subjecte no es
+toca fins a la puntuació final. Al cribratge, les rondes eliminatòries es decideixen només
+amb trials de validació; el holdout només es puntua per als 3 finalistes de cada tasca i el
+seu ensemble.
 
-```powershell
-$env:PYTHONPATH = "src"; py -3.13 -m br_analysis.research export
-```
+## Cribratge (`kaggle_screen.ipynb`)
 
-Això crea `artifacts/research/_export/` amb quatre fitxers:
+### Què prova
 
-| Fitxer | Mida aprox. |
-|---|---|
-| `c_vs_ip.npz` | ~590 MB |
-| `im_vs_ip.npz` | ~640 MB |
-| `deep_pooled.py` | l'script |
-| `kaggle_notebook.ipynb` | el notebook |
+Partint d'EEGNet + EA + augmentació, canvia **una cosa cada vegada**:
 
-Les dades són èpoques ja preprocessades de la finestra d'estímul (0–1,5 s, 0,1–30 Hz,
-250 Hz). No inclouen els FIF originals ni cap dada identificativa més enllà del codi de
-subjecte.
+- **Arquitectures:** EEG-Inception, EEGNeX, ShallowNet, ATCNet, EEGConformer, Deep4,
+  EEGSimpleConv, EEG-TCNet, EEG-ITNet, TIDNet, SCCNet, CTNet, MSVTNet, IFNet, FBCNet i
+  TSception.
+- **Filtres i resolució:** passa-alt 0,1 / 0,5 / 2 Hz, passa-baix 15 Hz, 64 i 250 Hz.
+- **Finestres dins l'estímul:** 0–0,5 s, 0,15–0,65 s, 0–1 s, 0,2–1 s i 0,5–1,5 s.
+- **Espai:** només canals posteriors, i sense Euclidean Alignment.
+- **Regularització:** sense augmentació, augmentació forta, mixup, label smoothing i
+  weight decay.
+- **Optimització:** learning rate i mida del batch.
+- **Multitasca:** la classe que li falta a cada tasca (C per a IM vs IP, IM per a C vs IP)
+  s'afegeix com a tercera classe d'entrenament.
 
-## 2. Pujar-les a Kaggle com a dataset privat (~10 min, un sol cop)
+### Com elimina configuracions
 
-1. Entra a <https://www.kaggle.com/datasets> → **New Dataset**.
-2. Arrossega els fitxers `c_vs_ip.npz`, `im_vs_ip.npz` i `deep_pooled.py`.
-3. Títol: per exemple `br-eeg-stimulus`. Visibilitat: **Private**. → **Create**.
+1. **Ronda 1:** totes les configuracions, amb 1 llavor.
+2. **Combinacions:** les 2 millors arquitectures més totes les millores que han superat la
+   base per més de 0,01 d'AUC.
+3. **Ronda 2:** les 6 millors fan 2 llavors més.
+4. **Ronda 3:** les 3 millors passen el protocol complet (3 llavors, fine-tuning per
+   subjecte i holdout). També es puntua l'ensemble de les tres.
 
-Si cal, verifica el compte amb el telèfon: Kaggle ho demana per poder fer servir GPU.
+Després de cada execució s'escriu una classificació (`_screen_leaderboard.csv`). Si
+Kaggle tallés l'execució, no es perdria el que ja estigués fet.
 
-## 3. Crear i llançar el notebook (~2 min)
+### Passos (~5 min de feina teva)
 
-1. <https://www.kaggle.com/code> → **New Notebook** → menú **File → Import Notebook** →
-   puja `kaggle_notebook.ipynb`.
+1. <https://www.kaggle.com/code> → **New Notebook** → **File → Import Notebook** → puja
+   `gpu/kaggle_screen.ipynb`.
 2. Al panell de la dreta:
-   - **Session options → Accelerator: GPU T4 x2**.
-   - **Internet: On**. Cal per descarregar braindecode i els pesos de CBraMod.
-3. **Add Input** → *Your Datasets* → `br-eeg-stimulus`.
-4. A dalt a la dreta: **Save Version → Save & Run All (Commit) → Save**.
+   - **Accelerator: GPU T4 x2**. Les dues GPU es fan servir alhora, una per tasca.
+   - **Internet: On**.
+3. **Add Input** → *Your Datasets* → el mateix dataset d'abans (`br-eeg-stimulus`). No cal
+   tornar-lo a pujar: l'script ja va dins el notebook.
+4. **Save Version → Save & Run All (Commit) → Save**. Ja pots tancar el navegador.
+5. Quan surti *Complete*: **Output** → descarrega `results.zip` → descomprimeix-lo a
+   `artifacts/research/_gpu2/` i digues-m'ho.
 
-Ja pots tancar el navegador: s'executa sol en segon pla. Kaggle et dona unes 30 h de GPU
-setmanals i com a màxim 12 h per execució.
+Si abans vols una prova ràpida d'uns 10 minuts, posa `QUICK = True` a la cel·la de
+llançament.
 
-## 4. Recollir els resultats
-
-1. Quan la versió surti com a *Complete*, obre-la → pestanya **Output** → descarrega
-   `results.zip`.
-2. Descomprimeix-lo, per exemple a `artifacts/research/_gpu/`, i importa'l:
+## Importar resultats (ho faig jo, però per si de cas)
 
 ```powershell
-$env:PYTHONPATH = "src"; py -3.13 -m br_analysis.research import-gpu artifacts/research/_gpu/results
+$env:PYTHONPATH = "src"; py -3.13 -m br_analysis.research import-gpu artifacts/research/_gpu2/results
 ```
 
 ```powershell
 $env:PYTHONPATH = "src"; py -3.13 -m br_analysis.research summary
 ```
 
-Els models de GPU apareixen a la mateixa taula que els clàssics, amb les mateixes
-estadístiques: permutacions per subjecte, prevalença i guany respecte a Riemann.
+## Regenerar els fitxers
+
+Si es modifica `deep_pooled.py`, cal regenerar el notebook amb
+`py -3.13 gpu/make_notebook.py`. També es regenera automàticament quan es fa `export`.
 
 ## Si alguna cosa falla
 
-- **"No GPU"**: comprova que l'accelerador sigui GPU i que el compte estigui verificat.
-- **Un model falla**: l'script continua amb els altres i escriu `FAILED: ...` al log.
-  Envia'm el log de la pestanya *Logs* i ho arreglo.
-- **Prova ràpida abans de llançar-ho tot**: canvia l'última línia de codi del notebook
-  per `--suite --max-subjects 3 --epochs 2 --seeds 1`. Triga uns 5 minuts.
+- **"No GPU"**: comprova que l'accelerador sigui GPU i que el compte estigui verificat amb
+  el telèfon.
+- **Una configuració falla**: el cribratge continua amb la resta i ho apunta com a
+  `FAILED` a la classificació.
+- **Logs**: `results/screen_c_vs_ip.log` i `results/screen_im_vs_ip.log` van dins el zip.

@@ -14,6 +14,7 @@ pipeline. Each candidate gets:
 from __future__ import annotations
 
 import json
+import runpy
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import cache
@@ -231,7 +232,8 @@ def export_for_gpu(task_ids: Sequence[str], preset: str = "erp", out_dir: Path |
             class_ids=np.asarray(dataset.class_ids, dtype=str),
         )
         print(f"exported {task_id}: {dataset.X.shape} -> {out_dir / (task_id + '.npz')}", flush=True)
-    for name in ("deep_pooled.py", "kaggle_notebook.ipynb"):
+    runpy.run_path(str(paths.project_dir / "gpu" / "make_notebook.py"))["build"]()  # refresh embedded script
+    for name in ("deep_pooled.py", "kaggle_notebook.ipynb", "kaggle_screen.ipynb"):
         source = paths.project_dir / "gpu" / name
         (out_dir / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     return out_dir
