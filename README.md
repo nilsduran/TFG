@@ -167,12 +167,34 @@ Under this stricter protocol, Riemannian TS-LDA still leads C vs IP with **55.0 
 is close behind at 54.9 %. IM vs IP stays at chance for every model. The ranking holds and the
 effect is smaller, which is expected once the subject selection used in the thesis is removed.
 
+### Follow-up research (this branch)
+
+Same protocol, same stimulus window (0–1.5 s), same untouched 20 % holdout per subject. Full notes are in
+[docs/post_tfg_research.md](docs/post_tfg_research.md) (in Catalan).
+
+- **C vs IP: 55 % → 64.6 %.** Training **one model on all subjects** (Euclidean Alignment, then
+  per-subject fine-tuning) is what makes the difference. EEGNet pooled reaches 62.2 % (+7.1 points
+  over per-subject Riemann, p = 0.0003). Adding the IM trials as a **third training class** gives 64.1 %,
+  and an ensemble of finalists chosen on validation data gives **64.6 %** (AUC 0.70, p < 0.0001).
+  These come from a successive-halving GPU screen of about 40 configurations (16 architectures,
+  filters, windows, regularisation) on Kaggle. A pretrained foundation model (CBraMod) does not help.
+- **IM vs IP: robust negative.** Every deep and classical configuration stays between 49 % and 52 % on
+  the holdout. A cheap, broad CPU exploration (27 feature families: band power from delta to high
+  gamma, ERPs, tangent-space covariances, and pre- and post-stimulus windows) finds only a tiny late
+  signal at 1.0–1.5 s (AUC ≈ 0.52) with a **flat learning curve**. **Behaviour alone** (stimulus
+  configuration + response history) predicts better (56.3 %) than any EEG feature, and EEG adds
+  nothing significant on top. The likely limit is information, not model capacity. Decoding this
+  question would probably need a different design, such as frequency tagging (SSVEP) or no-report
+  measures.
+
 ## Repository layout
 
 ```text
 src/br_analysis/        Python package: data loading, preprocessing, tasks, models, runners,
                         statistics (clustering, temporal onset), SHAP, reports and CLI
   runners/              shared training loops for classical and PyTorch models
+  research/             follow-up benchmark, pooled training and IM vs IP exploration
+gpu/                    pooled deep models and the Kaggle screening notebook
 src/notebooks/          12 narrative notebooks (EDA → clustering → models → explainability → report)
 tests/                  78 pytest tests (leakage-safe splits, metrics, runners, caches, CLI)
 animations/             Manim scenes behind the explainer video
