@@ -141,3 +141,70 @@ l'abast.
    - incloure el pre-estímul;
    - o analitzar les diferències individuals en la taxa de respostes "mixed", que va del
      19 % al 92 % segons el subjecte.
+
+## 5. IM vs IP: exploració barata i àmplia (CPU, sense holdout)
+
+Codi a `src/br_analysis/research/im_explore.py`. Les característiques s'extreuen una
+sola vegada per trial dels FIF originals (−1,24 a 2,0 s, 500 Hz). Cada prova és una
+regressió logística entrenada amb tots els subjectes alhora, amb z-score per subjecte
+calculat només amb dades de desenvolupament.
+
+### Troballa 1: el comportament prediu més que l'EEG
+
+Els codes 3/5/7 i 4/6/8 corresponen a les dues configuracions ull–color. Per subjecte
+estan equilibrades (ràtio 0,80–1,36).
+
+Una regressió logística amb dues fonts d'informació:
+- la configuració de l'estímul;
+- la història de respostes (si el trial anterior, i l'incongruent anterior, van ser
+  "mixed").
+
+Resultats al holdout:
+
+| Línia base de comportament | Holdout |
+|---|---:|
+| Configuració + història | **0,563** (p = 2·10⁻⁵) |
+| Només història | 0,532 (p = 3·10⁻⁴) |
+| Només configuració | 0,525 (n.s.) |
+
+Tots els models d'EEG provats abans (0,49–0,52) queden per sota.
+
+### Troballa 2: l'EEG gairebé no hi aporta res
+
+Es van provar 27 famílies de característiques: potència per bandes de delta a gamma alta,
+per finestra, de l'alfa posterior i de la gamma alta frontal; ERP en franges de 50 ms; i
+covariàncies a l'espai tangent. També es van mirar el pre-estímul i el post-estímul.
+
+- **Totes queden entre 0,47 i 0,54 d'AUC de validació.**
+- **Cap aporta un guany significatiu per sobre del comportament**: el màxim és +0,015, amb
+  p ≥ 0,19.
+- **L'únic indici coherent és a 1,0–1,5 s.** Amb validació creuada per blocs sobre tot el
+  desenvolupament es replica:
+
+  | Característica | AUC |
+  |---|---:|
+  | Espai tangent, 1,0–1,5 s | 0,521 (p = 0,010) |
+  | Potència per bandes, 1,0–1,5 s | 0,520 (p = 0,004) |
+  | ERP post-estímul, 1,5–2,0 s | 0,523 (p = 0,013) |
+  | *Control: espai tangent, 0–0,5 s* | *0,485* |
+
+- **La corba d'aprenentatge és plana.** Amb un 25 % dels subjectes s'obté 0,515, amb un
+  50 % 0,522 i amb el 100 % 0,521. Més dades o un model més gran no ajudarien.
+- **La finestra no val la pena ampliar-la.** El pre-estímul (−0,5–0 s) no aporta res amb
+  aquestes característiques (0,47–0,50).
+
+### Conclusió
+
+Al final de l'estímul hi ha un senyal real però molt petit (AUC ≈ 0,52, que equival a
+≈ 51–52 % de balanced accuracy). Encaixa amb la preparació de la decisió o la resposta més
+que amb la percepció mateixa, però amb aquestes dades no es pot distingir. No té sentit
+gastar GPU en aquesta tasca:
+
+- la corba d'aprenentatge és plana;
+- els models profunds ja havien fallat;
+- el comportament (configuració + història) és un predictor més fort que qualsevol
+  característica d'EEG.
+
+Si es vol continuar, el millor camí seria canviar la pregunta: modelar la història
+perceptiva o les diferències individuals en la taxa de respostes "mixed", del 19 % al 92 %
+segons el subjecte.
