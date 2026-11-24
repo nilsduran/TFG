@@ -208,3 +208,27 @@ gastar GPU en aquesta tasca:
 Si es vol continuar, el millor camí seria canviar la pregunta: modelar la història
 perceptiva o les diferències individuals en la taxa de respostes "mixed", del 19 % al 92 %
 segons el subjecte.
+
+## 6. Riemann clàssic entrenat amb tots els subjectes (CPU)
+
+Per separar l'efecte d'entrenar conjuntament de l'efecte del model profund: la mateixa
+pipeline Riemann del TFG, però entrenada amb tots els subjectes alhora i Euclidean
+Alignment, al mateix holdout.
+
+| C vs IP (holdout) | Bal. acc. | AUC | Comparació aparellada |
+|---|---:|---:|---|
+| Riemann per subjecte (TFG) | 0,550 | 0,620 | — |
+| **Riemann conjunt + EA** | **0,599** | **0,644** | vs per subjecte: +0,049 bal. acc. (p = 0,013), +0,025 AUC (n.s., p = 0,59) |
+| EEGNet conjunt | 0,622 | 0,669 | Riemann conjunt −0,024 (p = 0,14) |
+| Ensemble de finalistes GPU | 0,646 | 0,699 | Riemann conjunt −0,048 (p = 0,005), AUC −0,056 (p = 0,002) |
+
+12 de 47 subjectes significatius (p < 0,05).
+
+- **Entrenar conjuntament també ajuda el model clàssic**, però sobretot en la
+  balanced accuracy. L'AUC gairebé no canvia. Per tant, el guany ve més de calibrar
+  millor el llindar amb moltes dades que d'ordenar millor els trials.
+- **Els models profunds conjunts aporten un guany real per sobre**: amb multitasca i
+  ensemble, +5 punts de balanced accuracy i +0,056 d'AUC respecte del Riemann conjunt,
+  tots dos significatius.
+- Aproximadament la meitat de la millora total (55 % → 64,6 %) s'explica per l'entrenament
+  conjunt, i l'altra meitat pel model profund.
