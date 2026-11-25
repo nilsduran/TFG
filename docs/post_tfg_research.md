@@ -232,3 +232,7 @@ Alignment, al mateix holdout.
   tots dos significatius.
 - Aproximadament la meitat de la millora total (55 % → 64,6 %) s'explica per l'entrenament
   conjunt, i l'altra meitat pel model profund.
+
+**IM vs IP.** El Riemann conjunt dona 0,507 de balanced accuracy (AUC 0,513). No supera
+l'atzar (p = 0,89) ni el Riemann per subjecte (+0,006, p = 0,76), i només 2 de 47
+subjectes són significatius. L'entrenament conjunt no canvia el resultat negatiu.
