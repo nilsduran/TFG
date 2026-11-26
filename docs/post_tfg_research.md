@@ -236,3 +236,69 @@ Alignment, al mateix holdout.
 **IM vs IP.** El Riemann conjunt dona 0,507 de balanced accuracy (AUC 0,513). No supera
 l'atzar (p = 0,89) ni el Riemann per subjecte (+0,006, p = 0,76), i només 2 de 47
 subjectes són significatius. L'entrenament conjunt no canvia el resultat negatiu.
+
+## 7. IM vs IP: neurociència i comportament (sense descodificar)
+
+Codi a `src/br_analysis/research/im_neuro.py`; figures a `docs/images/post_tfg/` (generades amb
+`python -m br_analysis.research.post_figures`, en versió clara i fosca). Són anàlisis de grup,
+interpretables, que pregunten *on* i *quan* hi ha diferències, i què explica qui respon "mixed".
+
+### Mapes espectrals (figura 2)
+
+Per a cada subjecte, la d de Cohen per finestra × banda × sensor. Prova de grup amb una sola
+permutació de clústers sobre tota la graella (finestres × bandes × sensors), és a dir, una sola
+prova per contrast.
+
+- **C vs IP (control positiu):** un sol clúster gran (p = 0,001). Sota conflicte hi ha menys potència
+  alfa i beta (8–30 Hz) als sensors posteriors, a partir de 0,5 s, i el clúster ja té una mica de beta
+  a 0–0,5 s. Replica l'efecte del TFG i de l'estudi original.
+- **IM vs IP:** cap clúster (el millor té p = 0,61) en cap banda ni finestra, tampoc al pre-estímul.
+
+### ERP (figura 5)
+
+IM i IP se superposen gairebé del tot a les regions occipital, parietal i frontal. L'única diferència
+és un clúster parietal a 0,98–1,08 s (p = 0,023), sense corregir per les 3 regions (corregit,
+p ≈ 0,07). És coherent amb el senyal feble de 1,0–1,5 s de la secció 5.
+
+### Model d'equilibri interocular (figura 3)
+
+Les dues configuracions (A i B) intercanvien quin ull veu cada color. Model ordinal d'una sola
+variable per subjecte: un equilibri latent (avantatge de l'ull + avantatge del color) més soroll,
+tallat a ±θ. Entre −θ i θ la resposta és "mixed". El model prediu més "mixed" a la configuració més
+equilibrada.
+
+- **Prova no circular:** el desequilibri s'estima només amb les respostes pures (vermell contra verd),
+  que són trials diferents dels "mixed". Com més desequilibrada és una configuració, menys "mixed" hi
+  ha: Spearman ρ = −0,37, p = 0,010, amb el 66 % dels subjectes en la direcció predita.
+- **Limitacions:** el model no s'ajusta del tot a 9 dels 47 subjectes (en conjunt, p < 10⁻⁵), així que
+  és una bona primera aproximació però no ho explica tot. θ (l'amplada de la franja "mixed") explica
+  gairebé tota la diferència de taxa entre persones (ρ = 0,92), però això és gairebé una tautologia.
+
+### Comportament (figura 4)
+
+- **Inèrcia perceptiva:** després d'un trial "mixed", els dos trials incongruents següents tenen
+  +6 punts més de probabilitat de ser "mixed", per sobre d'un barrejat per blocs que conserva la deriva
+  lenta (p < 10⁻⁶). A partir del tercer trial desapareix. (Als desfasaments de 9–12 trials surt un
+  petit efecte negatiu que probablement és un artefacte del barrejat per blocs de 20.)
+- **Deriva dins la sessió:** la taxa de "mixed" puja del 60 % al 73 % durant el primer terç de la
+  sessió i després s'estabilitza al voltant del 66–70 %.
+- **Configuració:** 64,8 % de "mixed" a A i 69,2 % a B a nivell de grup (p = 0,053). A nivell
+  individual la diferència mitjana és de 9 punts.
+
+### Diferències individuals (figura 4, dreta)
+
+La taxa de "mixed" (del 19 % al 92 %) **no** es relaciona amb:
+
+- la dominància ocular;
+- la freqüència alfa individual, ni amb l'alçada o la potència del pic alfa (espectre del pre-estímul,
+  sensors posteriors);
+- la descodificabilitat del conflicte (AUC de C vs IP per subjecte);
+- la inèrcia perceptiva.
+
+Totes les correlacions tenen |ρ| < 0,16, amb p de Holm = 1.
+
+### Conclusió
+
+L'EEG de cuir cabellut porta una empremta clara de *si* els ulls estan en conflicte (alfa i beta
+posteriors), però gairebé res de *com* es resol. El que prediu la resolució és conductual: quin ull
+veu quin color (el balanç interocular) i què ha respost la persona fa un moment.
