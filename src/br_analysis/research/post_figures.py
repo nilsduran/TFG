@@ -1,4 +1,4 @@
-"""Figures for the follow-up research, in one visual system (light and dark variants).
+"""Figures for the further analyses, in one visual system (light and dark variants).
 
     python -m br_analysis.research.post_figures      # -> docs/images/post_tfg/*.png
 
@@ -482,6 +482,55 @@ def fig_poster_inertia(variant: str) -> Path:
     return save(fig, "inertia", variant)
 
 
+def _slope_panel(ax, before, after, labels, title, note):
+    up = after > before
+    for b, a, u in zip(before, after, up):
+        ax.plot([0, 1], [b, a], color=T["orange"] if u else T["muted"], alpha=0.45 if u else 0.5, lw=1)
+    mb, ma = float(np.mean(before)), float(np.mean(after))
+    ax.plot([0, 1], [mb, ma], color=T["ink"], lw=2.4, zorder=5)
+    ringed_dot(ax, [0, 1], [mb, ma], T["ink"], size=40, z=6)
+    ax.text(-0.06, mb, f"{mb:.0f} %", ha="right", va="center", fontsize=9, fontweight="semibold", color=T["ink"])
+    ax.text(1.06, ma, f"{ma:.0f} %", ha="left", va="center", fontsize=9, fontweight="semibold", color=T["ink"])
+    ax.set_xticks([0, 1], labels)
+    ax.set_xlim(-0.35, 1.35)
+    ax.set_ylim(0, 100)
+    ax.set_title(title)
+    ax.text(0.5, 0.03, note, transform=ax.transAxes, ha="center", va="bottom", fontsize=8, color=T["ink2"])
+
+
+def fig_poster_behaviour(variant: str) -> Path:
+    """Two paired comparisons a reader can take in at a glance: one line per person."""
+    from scipy.stats import wilcoxon
+
+    from .im_neuro import IM_CODES, IP_CODES, load_traits
+
+    bal = pd.read_csv(_neuro() / "balance_model.csv")
+    bal = bal[bal.pure_imbalance_a != bal.pure_imbalance_b]
+    a_balanced = bal.pure_imbalance_a < bal.pure_imbalance_b
+    more = np.where(a_balanced, bal.mixed_a, bal.mixed_b) * 100
+    less = np.where(a_balanced, bal.mixed_b, bal.mixed_a) * 100
+
+    after_pure, after_mixed = [], []
+    for d in load_traits().values():
+        c = d["codes"]
+        y = np.isin(c[np.isin(c, IP_CODES + IM_CODES)], IM_CODES).astype(int)
+        after_mixed.append(y[1:][y[:-1] == 1].mean() * 100)
+        after_pure.append(y[1:][y[:-1] == 0].mean() * 100)
+    after_pure, after_mixed = np.array(after_pure), np.array(after_mixed)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.7, 3.0), sharey=True, gridspec_kw={"wspace": 0.18})
+    fig.subplots_adjust(left=0.07, right=0.985, top=0.86, bottom=0.17)
+    _slope_panel(axes[0], less, more, ["less balanced\nconfiguration", "more balanced\nconfiguration"],
+                 "Balanced eyes → more “mixed”",
+                 f"{np.mean(more > less):.0%} of people go up · p = {wilcoxon(more - less).pvalue:.2f}")
+    _slope_panel(axes[1], after_pure, after_mixed, ["after a\nsingle-colour report", "after a\n“mixed” report"],
+                 "The last report sticks",
+                 f"{np.mean(after_mixed > after_pure):.0%} of people go up · p < 10⁻¹¹")
+    axes[0].set_ylabel("“Mixed” reports (%)")
+    axes[0].yaxis.set_major_formatter(lambda v, _: f"{v:.0f}")
+    return save(fig, "behaviour_slopes", variant)
+
+
 def poster(directory: Path) -> None:
     """Poster versions of figures 1-3 plus the inertia panel, light theme, at A3 physical size."""
     global POSTER
@@ -491,7 +540,7 @@ def poster(directory: Path) -> None:
              "ytick.labelsize": 8, "legend.fontsize": 8, "axes.titlepad": 7}
     try:
         with theme("light"), plt.rc_context(small):
-            for make in (fig_ladder, fig_maps, fig_balance, fig_poster_inertia):
+            for make in (fig_ladder, fig_maps, fig_poster_behaviour):
                 print(make("light"))
     finally:
         POSTER = None
