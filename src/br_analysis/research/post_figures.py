@@ -567,10 +567,10 @@ def _slope_panel(ax, before, after, labels, title, note):
     mb, ma = float(np.mean(before)), float(np.mean(after))
     ax.plot([0, 1], [mb, ma], color=T["ink"], lw=2.4, zorder=5)
     ringed_dot(ax, [0, 1], [mb, ma], T["ink"], size=40, z=6)
-    ax.text(-0.06, mb, f"{mb:.0f} %", ha="right", va="center", fontsize=9, fontweight="semibold", color=T["ink"])
-    ax.text(1.06, ma, f"{ma:.0f} %", ha="left", va="center", fontsize=9, fontweight="semibold", color=T["ink"])
+    ax.text(-0.06, mb, f"{mb:.0f}", ha="right", va="center", fontsize=8.5, fontweight="semibold", color=T["ink"])
+    ax.text(1.06, ma, f"{ma:.0f}", ha="left", va="center", fontsize=8.5, fontweight="semibold", color=T["ink"])
     ax.set_xticks([0, 1], labels)
-    ax.set_xlim(-0.35, 1.35)
+    ax.set_xlim(-0.42, 1.42)
     ax.set_ylim(0, 100)
     ax.set_title(title)
     ax.text(0.5, 0.03, note, transform=ax.transAxes, ha="center", va="bottom", fontsize=8, color=T["ink2"])
@@ -596,17 +596,63 @@ def fig_poster_behaviour(variant: str) -> Path:
         after_pure.append(y[1:][y[:-1] == 0].mean() * 100)
     after_pure, after_mixed = np.array(after_pure), np.array(after_mixed)
 
-    fig, axes = plt.subplots(1, 2, figsize=(10.7, 3.0), sharey=True, gridspec_kw={"wspace": 0.18})
-    fig.subplots_adjust(left=0.07, right=0.985, top=0.86, bottom=0.17)
-    _slope_panel(axes[0], less, more, ["less balanced\nconfiguration", "more balanced\nconfiguration"],
-                 "Balanced eyes → more “mixed”",
-                 f"{np.mean(more > less):.0%} of people go up · p = {wilcoxon(more - less).pvalue:.2f}")
-    _slope_panel(axes[1], after_pure, after_mixed, ["after a\nsingle-colour report", "after a\n“mixed” report"],
-                 "The last report sticks",
-                 f"{np.mean(after_mixed > after_pure):.0%} of people go up · p < 10⁻¹¹")
+    fig, axes = plt.subplots(1, 2, figsize=(5.2, 2.9), sharey=True, gridspec_kw={"wspace": 0.22})
+    fig.subplots_adjust(left=0.115, right=0.985, top=0.88, bottom=0.2)
+    _slope_panel(axes[0], less, more, ["less\nbalanced", "more\nbalanced"], "Balanced eyes",
+                 f"{np.mean(more > less):.0%} go up · p = {wilcoxon(more - less).pvalue:.2f}")
+    _slope_panel(axes[1], after_pure, after_mixed, ["after\none colour", "after\n“mixed”"], "Last report sticks",
+                 f"{np.mean(after_mixed > after_pure):.0%} go up · p < 10⁻¹¹")
     axes[0].set_ylabel("“Mixed” reports (%)")
     axes[0].yaxis.set_major_formatter(lambda v, _: f"{v:.0f}")
     return save(fig, "behaviour_slopes", variant)
+
+
+def fig_poster_calibration(variant: str) -> Path:
+    """Half-width poster version of figure 6: the two calibration axes, short labels."""
+    from .harness import results_dir
+
+    base = results_dir("c_vs_ip")
+    trials = pd.read_csv(base / "_calibration_tidy.csv")
+    sources = pd.read_csv(base / "_calibration_sources_tidy.csv")
+    fig, axes = plt.subplots(1, 2, figsize=(5.2, 2.9), sharey=True, gridspec_kw={"wspace": 0.12})
+    fig.subplots_adjust(left=0.115, right=0.985, top=0.88, bottom=0.2)
+
+    def line(ax, x, rows, color, dashed=False):
+        m = np.array([r[0] for r in rows])
+        e = np.array([r[1] for r in rows])
+        ax.fill_between(x, m - e, m + e, color=color, alpha=0.12, lw=0)
+        ax.plot(x, m, color=color, lw=1.6, ls=(0, (3, 1.5)) if dashed else "-")
+        ringed_dot(ax, x, m, color, size=16)
+
+    ax = axes[0]
+    steps = ["none", "5 trials", "10 trials", "20 trials", "20 %", "50 %"]
+    x = np.arange(len(steps))
+    for cond, color, dashed in (("align+labels", T["blue_dark"], True), ("align", T["blue"], False)):
+        rows = [_mean_sem((trials[trials.condition == "none"] if s_ == "none"
+                           else trials[(trials.condition == cond) & (trials.step == s_)]).bacc) for s_ in steps]
+        line(ax, x, rows, color, dashed)
+    ax.set_xticks(x, ["0", "5", "10", "20", "20 %", "50 %"])
+    ax.set_xlabel("Trials from the new person")
+    ax.set_title("Their own trials")
+
+    ax = axes[1]
+    for cond, color, dashed in (("80 % labelled", T["blue_dark"], True), ("zero-shot", T["blue"], False)):
+        g = sources[sources.target_data == cond]
+        counts = [n for n in SOURCE_COUNTS if (g.n_sources == n).any()]
+        line(ax, np.array([SOURCE_COUNTS.index(n) for n in counts]),
+             [_mean_sem(g[g.n_sources == n].bacc) for n in counts], color, dashed)
+    ax.set_xticks(range(len(SOURCE_COUNTS)), [str(n) for n in SOURCE_COUNTS])
+    ax.set_xlabel("Other people in training")
+    ax.set_title("Other people")
+    ax.legend(handles=[plt.Line2D([], [], color=T["blue"], lw=1.6, label="new person unlabelled"),
+                       plt.Line2D([], [], color=T["blue_dark"], lw=1.6, ls=(0, (3, 1.5)), label="new person labelled")],
+              loc="upper left", handlelength=1.8, fontsize=7)
+    for a in axes:
+        a.axhline(50, color=T["muted"], lw=0.8)
+    axes[0].set_ylabel("Balanced accuracy (%)")
+    axes[0].set_ylim(48, 64)
+    axes[0].set_yticks(range(50, 63, 4))
+    return save(fig, "calibration", variant)
 
 
 def poster(directory: Path) -> None:
@@ -618,7 +664,7 @@ def poster(directory: Path) -> None:
              "ytick.labelsize": 8, "legend.fontsize": 8, "axes.titlepad": 7}
     try:
         with theme("light"), plt.rc_context(small):
-            for make in (fig_ladder, fig_maps, fig_poster_behaviour):
+            for make in (fig_ladder, fig_maps, fig_poster_behaviour, fig_poster_calibration):
                 print(make("light"))
     finally:
         POSTER = None
