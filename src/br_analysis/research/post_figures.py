@@ -77,7 +77,7 @@ def diverging() -> LinearSegmentedColormap:
 # Poster mode: no in-figure headline, exact physical size (inches = CSS px / 96 on an A3 page), 300 dpi.
 POSTER: dict | None = None
 POSTER_LAYOUT = {  # name -> (size in inches, top margin)
-    "fig1": ((10.7, 3.15), 0.88), "fig2": ((10.7, 3.65), 0.90), "fig3": ((6.55, 3.1), 0.88),
+    "fig1": ((10.7, 2.95), 0.88), "fig2": ((10.7, 3.4), 0.90), "fig3": ((6.55, 3.1), 0.88),
 }
 
 
@@ -226,7 +226,7 @@ def fig_maps(variant: str) -> Path:
     headline(fig, "Conflict leaves a clear alpha–beta footprint; its resolution leaves none",
              "Group t of per-subject effect sizes (n = 47). Dots: sensors in a significant cluster (joint window × band × "
              "sensor permutation, p < 0.05). Red: less power under conflict.")
-    grid = fig.add_gridspec(2, 6, left=0.075, right=0.985, top=top("fig2", 0.80), bottom=0.08 if POSTER is None else 0.1, wspace=0.08, hspace=0.25,
+    grid = fig.add_gridspec(2, 6, left=0.075, right=0.985, top=top("fig2", 0.80), bottom=0.08 if POSTER is None else 0.13, wspace=0.08, hspace=0.25,
                             width_ratios=[1, 1, 1, 1, 0.12, 1.55])
     cmap = diverging()
     rows = (("c_vs_ip", "C vs IP", "congruent − conflict"), ("im_vs_ip", "IM vs IP", "mixed − single colour"))
@@ -270,7 +270,7 @@ def fig_maps(variant: str) -> Path:
         if counts.sum() == 0:
             ax.text(1.5, 3, "none", ha="center", va="center", fontsize=10, color=T["ink2"])
     fig.text(0.075 + 0.62 * 0.5, 0.025, "Alpha band (8–13 Hz) maps", ha="center", fontsize=9, color=T["ink2"])
-    cax = fig.add_axes([0.075, 0.035, 0.12, 0.012])
+    cax = fig.add_axes([0.075, 0.035 if POSTER is None else 0.065, 0.12, 0.012])
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(-vmax, vmax), cmap=cmap), cax=cax, orientation="horizontal")
     cb.outline.set_visible(False)
     cb.set_ticks([-vmax, 0, vmax])
@@ -596,7 +596,7 @@ def fig_poster_behaviour(variant: str) -> Path:
         after_pure.append(y[1:][y[:-1] == 0].mean() * 100)
     after_pure, after_mixed = np.array(after_pure), np.array(after_mixed)
 
-    fig, axes = plt.subplots(1, 2, figsize=(5.2, 2.9), sharey=True, gridspec_kw={"wspace": 0.22})
+    fig, axes = plt.subplots(1, 2, figsize=(5.2, 2.75), sharey=True, gridspec_kw={"wspace": 0.22})
     fig.subplots_adjust(left=0.115, right=0.985, top=0.88, bottom=0.2)
     _slope_panel(axes[0], less, more, ["less\nbalanced", "more\nbalanced"], "Balanced eyes",
                  f"{np.mean(more > less):.0%} go up · p = {wilcoxon(more - less).pvalue:.2f}")
@@ -614,7 +614,7 @@ def fig_poster_calibration(variant: str) -> Path:
     base = results_dir("c_vs_ip")
     trials = pd.read_csv(base / "_calibration_tidy.csv")
     sources = pd.read_csv(base / "_calibration_sources_tidy.csv")
-    fig, axes = plt.subplots(1, 2, figsize=(5.2, 2.9), sharey=True, gridspec_kw={"wspace": 0.12})
+    fig, axes = plt.subplots(1, 2, figsize=(5.2, 2.75), sharey=True, gridspec_kw={"wspace": 0.12})
     fig.subplots_adjust(left=0.115, right=0.985, top=0.88, bottom=0.2)
 
     def line(ax, x, rows, color, dashed=False):
