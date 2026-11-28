@@ -302,3 +302,62 @@ Totes les correlacions tenen |ρ| < 0,16, amb p de Holm = 1.
 L'EEG de cuir cabellut porta una empremta clara de *si* els ulls estan en conflicte (alfa i beta
 posteriors), però gairebé res de *com* es resol. El que prediu la resolució és conductual: quin ull
 veu quin color (el balanç interocular) i què ha respost la persona fa un moment.
+
+Sobre theta: cap sensor significatiu en C vs IP. El pic més alt durant l'estímul és t ≈ 4,0 a FT7
+(frontotemporal, propens a soroll muscular), i al pre-estímul n'hi ha un de t ≈ 3,6 (CP1), quan
+encara no hi ha conflicte: és nivell de soroll. El theta frontal clàssic de conflicte és de
+resposta i control (Stroop, flanker); aquí la resposta és diferida i el conflicte és perceptiu, de
+nivell baix. A més, una finestra de 0,5 s només conté 2–3 cicles de theta.
+
+## 8. Calibratge: quantes dades de la persona nova calen? (C vs IP, CPU)
+
+`python -m br_analysis.research.calibration c_vs_ip`. Versió ràpida del Riemann conjunt:
+covariàncies, EA en espai de covariància (R C R), espai tangent a la identitat i LDA amb shrinkage.
+Per a cada persona: entrenament **només amb els altres 46**, cadascun alineat amb tota la seva
+sessió. De la persona nova s'agafen els primers k trials, només per alinear (sense etiquetes) o
+també afegits amb etiquetes. Puntuació sempre sobre el 20 % final.
+
+| Dades de la persona nova | Només alinear | També amb etiquetes |
+|---|---|---|
+| cap (sense alinear) | 54,7 % | – |
+| 1 trial | 54,6 % | – |
+| 5 trials | 57,9 % | 58,7 % |
+| 20 trials | 58,5 % | 58,5 % |
+| 10 % de la sessió | 58,4 % | 58,9 % |
+| 20 % | **59,9 %** | 60,3 % |
+| 50 % | 60,8 % | 60,7 % |
+| 80 % | 60,8 % | 59,8 % |
+
+- Amb 5 trials sense etiquetar ja es guanyen ~3 punts; amb el 20 % de la sessió, ~5, i la corba
+  s'aplana. Tots els guanys respecte de no alinear són significatius (Wilcoxon, p < 0,006).
+- Les etiquetes de la persona nova no hi afegeixen res: tot el guany és l'alineament.
+- L'AUC és gairebé constant (≈ 0,635) des d'1 trial: l'alineament sobretot recol·loca el llindar
+  de decisió de cada persona, més que millorar la separació entre classes.
+- Correcció d'una xifra anterior: el 53,4 % per a subjectes no vistos venia d'un classificador
+  MDM log-euclidià. Amb espai tangent + LDA, el mateix escenari dona **60,8 %**, al nivell del model
+  conjunt que sí que veu les etiquetes de la persona.
+
+### L'altre eix: quants altres subjectes calen?
+
+`python -m br_analysis.research.calibration c_vs_ip --sources` (amb `--shard i/3` per repartir-ho en
+3 processos). Per a cada persona, N altres subjectes a l'atzar (repetit 5 cops per N ≤ 5 i 3 per
+N = 10, 20), més les dades de la persona nova: el 80 % sense etiquetes (només alinear), o el primer
+20 % / 80 % amb etiquetes. N = 0 és el model per subjecte (només dades pròpies).
+
+| Altres subjectes | 80 % sense etiquetes | 20 % etiquetat | 80 % etiquetat |
+|---|---|---|---|
+| 0 | – | 51,0 % (n.s.) | 54,0 % |
+| 1 | 52,0 % | 51,9 % | 54,5 % |
+| 2 | 53,8 % | 53,2 % | 54,9 % |
+| 5 | 55,1 % | 55,1 % | 56,1 % |
+| 10 | 54,4 % | 55,5 % | 56,3 % |
+| 20 | 57,3 % | 57,2 % | 58,4 % |
+| 46 | **60,8 %** | 60,2 % | 59,8 % |
+
+- La corba **no s'aplana** a 46: més participants probablement ajudarien més que més trials per
+  persona.
+- Les etiquetes pròpies només compten quan hi ha pocs subjectes (amb 0–2, el 80 % etiquetat guanya
+  1–3 punts); amb 46, les tres variants convergeixen.
+- El model només amb dades pròpies (54,0 %) és coherent amb el Riemann per subjecte (55,0 %).
+
+Figura: `docs/images/post_tfg/fig6_calibration.png`.

@@ -460,7 +460,85 @@ def fig_erp(variant: str) -> Path:
     return save(fig, "fig5_erp", variant)
 
 
-FIGURES = [fig_ladder, fig_maps, fig_balance, fig_behaviour, fig_erp]
+CALIB_STEPS = ["1 trials", "5 trials", "10 trials", "20 trials", "10 %", "20 %", "50 %", "80 %"]
+CALIB_LABELS = ["1", "5", "10", "20", "10 %", "20 %", "50 %", "80 %"]
+SOURCE_COUNTS = [0, 1, 2, 5, 10, 20, 46]
+
+
+def _mean_sem(values) -> tuple[float, float]:
+    values = np.asarray(values, dtype=float) * 100
+    return float(values.mean()), float(values.std(ddof=1) / np.sqrt(len(values)))
+
+
+def _band_line(ax, x, rows, color, dashed=False, label=None, label_dy=0.0):
+    m = np.array([r[0] for r in rows])
+    e = np.array([r[1] for r in rows])
+    ax.fill_between(x, m - e, m + e, color=color, alpha=0.12, lw=0)
+    ax.plot(x, m, color=color, lw=2, ls=(0, (4, 2)) if dashed else "-")
+    ringed_dot(ax, x, m, color, size=30)
+    if label:
+        ax.text(x[-1] + 0.25, m[-1] + label_dy, label, fontsize=fs(8.5), color=T["ink2"], va="center")
+
+
+def fig_calibration(variant: str) -> Path:
+    """Two views of calibration for a new person (C vs IP, fast pooled Riemann: EA + tangent space + LDA)."""
+    from .harness import results_dir
+
+    base = results_dir("c_vs_ip")
+    trials = pd.read_csv(base / "_calibration_tidy.csv")
+    sources = pd.read_csv(base / "_calibration_sources_tidy.csv")
+    none = _mean_sem(trials[trials.condition == "none"].bacc)
+
+    fig, axes = plt.subplots(1, 2, figsize=size("fig6", (11, 4.4)), sharey=True,
+                             gridspec_kw={"wspace": 0.1, "width_ratios": [1.15, 1]})
+    fig.subplots_adjust(left=0.065, right=0.99, top=top("fig6", 0.78), bottom=0.17)
+    headline(fig, "A few unlabelled trials align a new person; more people in training keep helping",
+             "C vs IP, balanced accuracy on each person's untouched final 20 % of trials (mean ± SEM, 47 people).")
+
+    ax = axes[0]
+    x = np.arange(len(CALIB_STEPS))
+    rows = {c: [_mean_sem(trials[(trials.condition == c) & (trials.step == s)].bacc) for s in steps]
+            for c, steps in (("align", CALIB_STEPS), ("align+labels", CALIB_STEPS[1:]))}
+    ax.axhline(none[0], color=T["muted"], lw=1, ls=(0, (2, 2)))
+    ax.text(-0.3, none[0] + 0.4, "trained on the other 46, no alignment", fontsize=fs(8), color=T["muted"], va="bottom")
+    _band_line(ax, x[1:], rows["align+labels"], T["blue_dark"], dashed=True)
+    _band_line(ax, x, rows["align"], T["blue"])
+    ax.axvline(3.5, color=T["grid"], lw=1)
+    ax.set_xticks(x, CALIB_LABELS)
+    ax.set_xlim(-0.4, len(x) - 0.6)
+    ax.set_xlabel("First trials of the new person's session (count, then share of the session)")
+    ax.set_title("How much of the new person?")
+    ax.legend(handles=[plt.Line2D([], [], color=T["blue"], lw=2, label="used only to align (no labels)"),
+                       plt.Line2D([], [], color=T["blue_dark"], lw=2, ls=(0, (4, 2)), label="also added with labels")],
+              loc="lower right", handlelength=2.2)
+
+    ax = axes[1]
+    x = np.arange(len(SOURCE_COUNTS))
+    styles = (("zero-shot", T["blue"], False, "80 % unlabelled"),
+              ("20 % labelled", T["blue_dark"], True, "20 % labelled"),
+              ("80 % labelled", T["blue_dark"], False, "80 % labelled"))
+    for cond, color, dashed, label in styles:
+        g = sources[sources.target_data == cond]
+        counts = [n for n in SOURCE_COUNTS if (g.n_sources == n).any()]
+        xs = np.array([SOURCE_COUNTS.index(n) for n in counts])
+        _band_line(ax, xs, [_mean_sem(g[g.n_sources == n].bacc) for n in counts], color, dashed)
+    ax.legend(handles=[plt.Line2D([], [], color=c, lw=2, ls=(0, (4, 2)) if d else "-", label=f"new person: {lab}")
+                       for _, c, d, lab in styles], loc="upper left", handlelength=2.2)
+    ax.set_xticks(x, [str(n) for n in SOURCE_COUNTS])
+    ax.set_xlim(-0.3, len(x) - 0.7)
+    ax.set_xlabel("Other people in the training set  (0 = own data only)")
+    ax.set_title("How many other people?")
+
+    for a in axes:
+        a.axhline(50, color=T["muted"], lw=1)
+    axes[0].text(len(CALIB_STEPS) - 0.65, 50.3, "chance", fontsize=fs(8), color=T["muted"], ha="right", va="bottom")
+    axes[0].set_ylabel("Balanced accuracy (%)")
+    axes[0].set_ylim(46, 66)
+    axes[0].set_yticks(range(48, 66, 4))
+    return save(fig, "fig6_calibration", variant)
+
+
+FIGURES = [fig_ladder, fig_maps, fig_balance, fig_behaviour, fig_erp, fig_calibration]
 
 
 def fig_poster_inertia(variant: str) -> Path:

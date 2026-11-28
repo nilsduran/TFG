@@ -221,6 +221,18 @@ frequency, alpha power, or how decodable their conflict signal is (all |ρ| < 0.
   <img src="docs/images/post_tfg/fig4_behaviour.png" alt="Four panels: sorted per-subject mixed rates from 19 to 92 %; serial dependence peaking at lags 1 and 2; mixed rate rising across the session; and a forest plot of trait correlations all overlapping zero.">
 </picture>
 
+**Calibrating for a new person.** A fast pooled Riemannian model (tangent space + shrinkage LDA),
+trained only on *other* people, already reaches 60.8 % for C vs IP on someone it has never seen,
+using their first trials **unlabelled**, only to align. Five such trials add 3 points over no
+alignment; 20 % of the session gets the full gain, and adding the new person's labels changes
+nothing. Seen from the other side, accuracy keeps rising with the number of people in training and
+has not levelled off at 46, so more participants would probably help more than more trials each.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/post_tfg/fig6_calibration_dark.png">
+  <img src="docs/images/post_tfg/fig6_calibration.png" alt="Left: balanced accuracy for an unseen person rises from 54.6 % with one alignment trial to about 58 % with five and 60.8 % with half the session; adding labels does not help. Right: accuracy rises steadily from about 51–54 % with zero or one other person to about 60 % with 46 others, without levelling off.">
+</picture>
+
 **Bottom line.** Scalp EEG carries a clear, decodable signature of *whether* the eyes disagree, but
 almost none of *how* the disagreement is resolved. What predicts the resolution is behavioural:
 which eye gets which colour, and what the person reported a moment ago. Decoding the percept itself
