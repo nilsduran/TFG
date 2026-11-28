@@ -74,12 +74,38 @@ def diverging() -> LinearSegmentedColormap:
     return LinearSegmentedColormap.from_list("bmr", [T["blue_dark"], T["blue"], T["mid"], T["red"], T["red_dark"]])
 
 
+# Poster mode: no in-figure headline, exact physical size (inches = CSS px / 96 on an A3 page), 300 dpi.
+POSTER: dict | None = None
+POSTER_LAYOUT = {  # name -> (size in inches, top margin)
+    "fig1": ((10.7, 3.15), 0.88), "fig2": ((10.7, 3.65), 0.90), "fig3": ((6.55, 3.1), 0.88),
+}
+
+
+def size(name: str, default):
+    return POSTER_LAYOUT[name][0] if POSTER is not None else default
+
+
+def fs(points: float) -> float:
+    return points * 0.78 if POSTER is not None else points
+
+
+def top(name: str, default: float) -> float:
+    return POSTER_LAYOUT[name][1] if POSTER is not None else default
+
+
 def headline(fig, title: str, subtitle: str, y: float = 0.985) -> None:
+    if POSTER is not None:
+        return
     fig.text(0.012, y, title, fontsize=14, fontweight="semibold", color=T["ink"], va="top")
     fig.text(0.012, y - 0.055, subtitle, fontsize=10, color=T["ink2"], va="top")
 
 
 def save(fig, name: str, variant: str) -> Path:
+    if POSTER is not None:
+        path = POSTER["dir"] / f"poster_{name}.png"
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
+        return path
     path = out_dir() / f"{name}{'' if variant == 'light' else '_dark'}.png"
     fig.savefig(path, dpi=200)
     plt.close(fig)
@@ -94,7 +120,7 @@ def bootstrap_ci(values: np.ndarray, n: int = 5000, seed: int = 0) -> tuple[floa
 
 
 def ringed_dot(ax, x, y, color, size=46, z=5):
-    ax.scatter(x, y, s=size, color=color, edgecolor=T["surface"], linewidth=2, zorder=z)
+    ax.scatter(x, y, s=size, color=color, edgecolor=T["surface"], linewidth=2 if POSTER is None else 1.1, zorder=z)
 
 
 # ----------------------------------------------------------------------------- figure 1
@@ -126,8 +152,8 @@ def _scores(task: str, run: str) -> np.ndarray:
 
 
 def fig_ladder(variant: str) -> Path:
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.9), sharey=True, gridspec_kw={"wspace": 0.08})
-    fig.subplots_adjust(left=0.065, right=0.99, top=0.80, bottom=0.15)
+    fig, axes = plt.subplots(1, 2, figsize=size("fig1", (11, 4.9)), sharey=True, gridspec_kw={"wspace": 0.08})
+    fig.subplots_adjust(left=0.065, right=0.99, top=top("fig1", 0.80), bottom=0.15 if POSTER is None else 0.19)
     headline(fig, "Pooling subjects lifts conflict detection; conflict resolution stays at chance",
              "Balanced accuracy on each subject's untouched final 20 % of trials. Dots: subjects. Bars: mean with 95 % bootstrap CI.")
     rng = np.random.default_rng(1)
@@ -159,7 +185,7 @@ def fig_ladder(variant: str) -> Path:
                     ax.plot([xx, xx], [y - 0.008, y], color=T["ink2"], lw=1)
                 ax.text((a + b) / 2, y + 0.006, text, ha="center", va="bottom", fontsize=9, color=T["ink2"])
         else:
-            ax.text(4, 0.875, "no EEG: stimulus\nconfiguration + history", ha="center", va="bottom", fontsize=8.5, color=T["ink2"])
+            ax.text(4.45, 0.875, "no EEG: stimulus\nconfiguration + history", ha="right", va="bottom", fontsize=8.5, color=T["ink2"])
     axes[0].set_ylabel("Balanced accuracy (holdout)")
     axes[0].set_ylim(0.3, 0.93)
     axes[0].set_yticks(np.arange(0.3, 0.81, 0.1))
@@ -196,11 +222,11 @@ def fig_maps(variant: str) -> Path:
     info = channel_info(maps["channels"])
     alpha = 2
     vmax = float(np.ceil(np.abs(maps["c_vs_ip_t"][:, alpha]).max()))
-    fig = plt.figure(figsize=(11, 5.6))
+    fig = plt.figure(figsize=size("fig2", (11, 5.6)))
     headline(fig, "Conflict leaves a clear alpha–beta footprint; its resolution leaves none",
              "Group t of per-subject effect sizes (n = 47). Dots: sensors in a significant cluster (joint window × band × "
              "sensor permutation, p < 0.05). Red: less power under conflict.")
-    grid = fig.add_gridspec(2, 6, left=0.075, right=0.985, top=0.80, bottom=0.08, wspace=0.08, hspace=0.25,
+    grid = fig.add_gridspec(2, 6, left=0.075, right=0.985, top=top("fig2", 0.80), bottom=0.08 if POSTER is None else 0.1, wspace=0.08, hspace=0.25,
                             width_ratios=[1, 1, 1, 1, 0.12, 1.55])
     cmap = diverging()
     rows = (("c_vs_ip", "C vs IP", "congruent − conflict"), ("im_vs_ip", "IM vs IP", "mixed − single colour"))
@@ -260,8 +286,8 @@ def fig_balance(variant: str) -> Path:
     from scipy.stats import norm, spearmanr
 
     bal = pd.read_csv(_neuro() / "balance_model.csv")
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.6), gridspec_kw={"width_ratios": [1.15, 1], "wspace": 0.22})
-    fig.subplots_adjust(left=0.04, right=0.985, top=0.78, bottom=0.13)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=size("fig3", (11, 4.6)), gridspec_kw={"width_ratios": [1.15, 1], "wspace": 0.22 if POSTER is None else 0.3})
+    fig.subplots_adjust(left=0.04 if POSTER is None else 0.02, right=0.985, top=top("fig3", 0.78), bottom=0.13 if POSTER is None else 0.16)
     headline(fig, "A one-variable model of the report: mixed percepts happen when the eyes are balanced",
              "Each configuration swaps which eye sees which colour. If eye and colour advantages add, one configuration is "
              "more balanced, and should give more “mixed” reports.")
@@ -278,23 +304,23 @@ def fig_balance(variant: str) -> Path:
         ax1.fill_between(x[inside], 0, y[inside], color=c, alpha=0.18 if s < 1 else 0.10, lw=0)
         p_mixed = norm.cdf(theta - s) - norm.cdf(-theta - s)
         peak = norm.pdf(0)
-        ax1.text(s + (-0.35 if s < 1 else 0.35), peak + 0.015, f"{name}\nP(mixed) = {p_mixed:.0%}", fontsize=8.8,
+        ax1.text(-theta - 0.12 if s < 1 else s + 0.35, peak + 0.015, f"{name}\nP(mixed) = {p_mixed:.0%}", fontsize=fs(8.8),
                  color=T["ink"], va="bottom", ha="right" if s < 1 else "left")
     for edge in (-theta, theta):
         ax1.axvline(edge, color=T["ink2"], lw=1)
-    ax1.text(0, -0.055, "“mixed”", ha="center", fontsize=9.5, color=T["ink"], fontweight="semibold")
-    ax1.text(-2.5, -0.055, "“colour 1”", ha="center", fontsize=9.5, color=T["ink2"])
-    ax1.text(2.5, -0.055, "“colour 2”", ha="center", fontsize=9.5, color=T["ink2"])
-    ax1.text(theta + 0.05, 0.53, "θ", fontsize=10, color=T["ink2"])
-    ax1.text(-theta - 0.05, 0.53, "−θ", fontsize=10, color=T["ink2"], ha="right")
+    ax1.text(0, -0.055, "“mixed”", ha="center", fontsize=fs(9.5), color=T["ink"], fontweight="semibold")
+    ax1.text(-2.5, -0.055, "“colour 1”", ha="center", fontsize=fs(9.5), color=T["ink2"])
+    ax1.text(2.5, -0.055, "“colour 2”", ha="center", fontsize=fs(9.5), color=T["ink2"])
+    ax1.text(theta + 0.05, 0.53, "θ", fontsize=fs(10), color=T["ink2"])
+    ax1.text(-theta - 0.05, 0.53, "−θ", fontsize=fs(10), color=T["ink2"], ha="right")
     ax1.set_ylim(-0.09, 0.62)
     ax1.set_xlim(-4, 4)
     ax1.set_yticks([])
     ax1.set_xticks([])
     ax1.grid(False)
     ax1.spines["left"].set_visible(False)
-    ax1.set_title("Model: latent balance s + noise, cut at ±θ")
-    ax1.set_xlabel("latent balance s = eye advantage + colour advantage", fontsize=9)
+    ax1.set_title("Model: latent balance s + noise, cut at ±θ" if POSTER is None else "Model: balance s + noise, cut at ±θ")
+    ax1.set_xlabel("latent balance s = eye advantage + colour advantage", fontsize=fs(9))
 
     # right: test on independent trials
     dx = (bal.pure_imbalance_a - bal.pure_imbalance_b) * 100
@@ -308,19 +334,19 @@ def fig_balance(variant: str) -> Path:
     slope, intercept = np.polyfit(dx, dy, 1)
     xs = np.array([-lim_x, lim_x])
     ax2.plot(xs, intercept + slope * xs, color=T["ink2"], lw=1.4)
-    ringed_dot(ax2, dx, dy, T["orange"], size=42)
+    ringed_dot(ax2, dx, dy, T["orange"], size=42 if POSTER is None else 22)
     rho, p = spearmanr(dx, dy)
     ok = np.mean(np.sign(dx) == -np.sign(dy))
     ax2.text(0.98, 0.97, f"Spearman ρ = {rho:.2f}, p = {p:.3f}\n{ok:.0%} of subjects in the predicted quadrants".replace("-", "−"),
-             transform=ax2.transAxes, ha="right", va="top", fontsize=9, color=T["ink"])
-    ax2.text(lim_x * 0.97, -lim_y * 0.93, "predicted", ha="right", fontsize=8.5, color=T["ink2"])
-    ax2.text(-lim_x * 0.97, lim_y * 0.88, "predicted", ha="left", fontsize=8.5, color=T["ink2"])
+             transform=ax2.transAxes, ha="right", va="top", fontsize=fs(9), color=T["ink"])
+    ax2.text(lim_x * 0.97, -lim_y * 0.93, "predicted", ha="right", fontsize=fs(8.5), color=T["ink2"])
+    ax2.text(-lim_x * 0.97, lim_y * 0.88, "predicted", ha="left", fontsize=fs(8.5), color=T["ink2"])
     ax2.set_xlim(-lim_x, lim_x)
     ax2.set_ylim(-lim_y, lim_y)
     ax2.grid(True, axis="both")
-    ax2.set_xlabel("Imbalance, config. A − B (pure reports only, points)")
-    ax2.set_ylabel("“Mixed” rate, config. A − B (points)")
-    ax2.set_title("Test on separate trials: more imbalance → fewer “mixed”")
+    ax2.set_xlabel("Imbalance, config. A − B (pure reports only, points)" if POSTER is None else "Imbalance A − B (pure reports only)")
+    ax2.set_ylabel("“Mixed” rate, config. A − B (points)" if POSTER is None else "“Mixed” rate A − B (points)")
+    ax2.set_title("Test on separate trials: more imbalance → fewer “mixed”" if POSTER is None else "Test on separate trials")
     return save(fig, "fig3_balance_model", variant)
 
 
@@ -437,7 +463,46 @@ def fig_erp(variant: str) -> Path:
 FIGURES = [fig_ladder, fig_maps, fig_balance, fig_behaviour, fig_erp]
 
 
+def fig_poster_inertia(variant: str) -> Path:
+    lags = pd.read_csv(_neuro() / "behaviour_lags.csv").assign(excess=lambda d: d.observed - d.null)
+    fig, ax = plt.subplots(figsize=(3.85, 3.1))
+    fig.subplots_adjust(left=0.17, right=0.97, top=0.88, bottom=0.16)
+    g = lags[lags.lag <= 10].groupby("lag").excess
+    mean = g.mean() * 100
+    ci = np.array([bootstrap_ci(v.dropna().to_numpy() * 100) for _, v in g])
+    ax.axhline(0, color=T["axis"], lw=1)
+    ax.fill_between(mean.index, ci[:, 0], ci[:, 1], color=T["orange"], alpha=0.12, lw=0)
+    ax.plot(mean.index, mean, color=T["orange"], lw=2)
+    ringed_dot(ax, mean.index[:2], mean.iloc[:2], T["orange"], size=34)
+    ax.text(2.5, mean.iloc[1] + 0.3, f"+{mean.iloc[0]:.0f} points after\na “mixed” trial", fontsize=8, color=T["ink2"])
+    ax.set_xticks([1, 2, 4, 6, 8, 10])
+    ax.set_xlabel("Conflict trials back")
+    ax.set_ylabel("Extra P(“mixed”), points")
+    ax.set_title("Perceptual inertia")
+    return save(fig, "inertia", variant)
+
+
+def poster(directory: Path) -> None:
+    """Poster versions of figures 1-3 plus the inertia panel, light theme, at A3 physical size."""
+    global POSTER
+    POSTER = {"dir": directory}
+    directory.mkdir(parents=True, exist_ok=True)
+    small = {"font.size": 8.5, "axes.titlesize": 9.5, "axes.labelsize": 8.5, "xtick.labelsize": 8,
+             "ytick.labelsize": 8, "legend.fontsize": 8, "axes.titlepad": 7}
+    try:
+        with theme("light"), plt.rc_context(small):
+            for make in (fig_ladder, fig_maps, fig_balance, fig_poster_inertia):
+                print(make("light"))
+    finally:
+        POSTER = None
+
+
 def main() -> None:
+    import sys
+
+    if len(sys.argv) > 2 and sys.argv[1] == "--poster":
+        poster(Path(sys.argv[2]))
+        return
     for variant in ("light", "dark"):
         with theme(variant):
             for make in FIGURES:
