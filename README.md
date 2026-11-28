@@ -142,6 +142,11 @@ recognises the participant from a held-out trial with **more than 98 % accuracy*
 strong personal fingerprint. This is also why random trial-level splits are dangerous: a model can
 score well by recognising the person or the session instead of the condition.
 
+One caveat, found after the thesis: every participant was recorded in a single session, so person and
+session (cap placement, impedances, room) cannot be separated with this dataset. Identification per
+frequency band also points to a large non-neural part: it reaches 35 % from delta alone but 95 % from
+gamma (30–45 Hz) alone, the band most affected by muscle and electrode noise (chance: 2 %).
+
 ## Takeaways
 
 > **Science:** conflict-related perceptual information *is* present in single-trial scalp EEG, but it

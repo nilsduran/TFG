@@ -361,3 +361,37 @@ N = 10, 20), més les dades de la persona nova: el 80 % sense etiquetes (només 
 - El model només amb dades pròpies (54,0 %) és coherent amb el Riemann per subjecte (55,0 %).
 
 Figura: `docs/images/post_tfg/fig6_calibration.png`.
+
+## 9. Altres comprovacions
+
+### El clúster de theta fronto-medial de la tesi no es manté amb els 47 subjectes
+
+`python -m br_analysis.research.theta_cluster`. Test de clústers canal × temps (5000 permutacions),
+C vs IP, finestra 0–1,5 s, tots els subjectes.
+
+- La tesi reportava un clúster de theta a Fz i FCz (1,17–1,24 s), trobat amb un subconjunt de
+  subjectes i amb la cerca restringida a Fz, FCz i Cz. La xifra de la tesi no és coherent: la taula
+  diu p corregida = 0,024, però les figures i el text diuen 0,1.
+- Amb els 47 subjectes, restringit a Fz, FCz i Cz, **no es forma cap clúster** (ni amb llindar 0,01 ni
+  0,05). La direcció és la mateixa (IP > C), però el t més alt és 1,8 a Fz (~1,0 s, p sense corregir
+  = 0,08): una tendència.
+- A tot el cuir cabellut, el theta tampoc arriba (millor clúster posterior, p = 0,16).
+- L'alfa sí que es manté: clúster ampli posterior i central des de ~0,4–0,6 s, p = 0,002.
+
+### Per què afegir IM com a tercera classe no empitjora C vs IP
+
+La tasca avaluada continua sent C vs IP. Els trials IM d'entrenament s'hi afegeixen com a tercera
+classe i, al test (només C i IP), la seva probabilitat es descarta. Com que IM també és conflicte
+(mateixa supressió d'alfa i beta), és en la pràctica més dades de conflicte; confondre IM amb IP no
+penalitza. El guany (+1,9 punts sobre l'EEGNet conjunt) no és significatiu (p = 0,12).
+
+### Identificació de subjectes: persona o sessió?
+
+Cada participant té una sola sessió, així que persona i sessió no es poden separar. Per bandes
+(divisió cronològica dins la sessió, atzar 0,021): delta 0,35, theta 0,50, alfa 0,70, beta 0,80–0,93,
+gamma 0,95–0,96, totes 0,98. Les freqüències altes (soroll muscular i d'elèctrode) hi pesen molt.
+
+### Línia base de comportament per a C vs IP
+
+Posició al bloc + historial: 51,0 % (p = 0,17), conjunt 51,1 %. P(C | anterior C) = 0,368 contra
+0,361 (n.s.). L'ordre dels trials és aleatori, així que el C vs IP no ve del comportament.
